@@ -248,6 +248,32 @@ private:
     std::vector<Value> vpValue;
 };
 
+class AccumulatorLocation final : public Accumulator {
+public:
+    explicit AccumulatorLocation(const boost::intrusive_ptr<ExpressionContext>& expCtx);
+
+    void processInternal(const Value& input, bool merging) final;
+    
+    Value getValue(bool toBeMerged) const final;
+    const char* getOpName() const final;
+    void reset() final;
+
+
+    static boost::intrusive_ptr<Accumulator> create(
+        const boost::intrusive_ptr<ExpressionContext>& expCtx);
+
+    bool isAssociative() const final {
+        return true;
+    }
+
+    bool isCommutative() const final {
+        return true;
+    }
+private:
+    std::vector<Value> vpValue;
+    Value _current;
+};
+
 
 class AccumulatorAvg final : public Accumulator {
 public:

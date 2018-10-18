@@ -180,6 +180,7 @@ env.Library(
         'accumulator_add_to_set.cpp',
         'accumulator_avg.cpp',
         'accumulator_first.cpp',
+        'accumulator_location.cpp',
         'accumulator_last.cpp',
         'accumulator_min_max.cpp',
         'accumulator_push.cpp',
