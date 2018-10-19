@@ -248,6 +248,7 @@ private:
     std::vector<Value> vpValue;
 };
 
+
 class AccumulatorAvg final : public Accumulator {
 public:
     explicit AccumulatorAvg(const boost::intrusive_ptr<ExpressionContext>& expCtx);
