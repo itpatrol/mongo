@@ -532,32 +532,6 @@ const char* ExpressionAnyElementTrue::getOpName() const {
     return "$anyElementTrue";
 }
 
-/* ---------------------- ExpressionLocation --------------------------- */
-
-Value ExpressionLocation::evaluateInternal(Variables* vars) const {
-    vector<Value> values;
-    values.reserve(vpOperand.size());
-    for (auto&& expr : vpOperand) {
-        Value elemVal = expr->evaluateInternal(vars);
-        values.push_back(elemVal.missing() ? Value(BSONNULL) : std::move(elemVal));
-    }
-    return Value(std::move(values));
-}
-
-Value ExpressionLocation::serialize(bool explain) const {
-    vector<Value> expressions;
-    expressions.reserve(vpOperand.size());
-    for (auto&& expr : vpOperand) {
-        expressions.push_back(expr->serialize(explain));
-    }
-    return Value(std::move(expressions));
-}
-
-const char* ExpressionLocation::getOpName() const {
-    // This should never be called, but is needed to inherit from ExpressionNary.
-    return "$location";
-}
-
 /* ---------------------- ExpressionArray --------------------------- */
 
 Value ExpressionArray::evaluateInternal(Variables* vars) const {

@@ -114,11 +114,6 @@ private:
     Value extractKey(const Document& doc);
 
     /**
-     * Calculates the bucket location for the input documents and places them into buckets.
-     */
-    void populateBuckets();
-
-    /**
      * Adds the document in 'entry' to 'bucket' by updating the accumulators in 'bucket'.
      */
     void addDocumentToBucket(const std::pair<Value, Document>& entry, Bucket& bucket);

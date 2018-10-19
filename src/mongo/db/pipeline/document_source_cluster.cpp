@@ -54,15 +54,68 @@ const char* DocumentSourceCluster::getSourceName() const {
 
 DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
     pExpCtx->checkForInterrupt();
+    LOG(3) << "getNext " ;
 
     if (!_populated) {
-        const auto populationResult = populateSorter();
-        if (populationResult.isPaused()) {
-            return populationResult;
-        }
-        invariant(populationResult.isEOF());
+        pair<Value, Document> currentValue;
+        auto next = pSource->getNext();
+        for (; next.isAdvanced(); next = pSource->getNext()) {
+            auto nextDoc = next.releaseDocument();
 
-        populateBuckets();
+            currentValue = std::make_pair(extractKey(nextDoc), nextDoc);
+            LOG(3) << "getNext first:" << currentValue.first ;
+            const vector<Value>& locationItem = currentValue.first.getArray();
+            vector<Value>::const_iterator it = locationItem.begin();
+            double docLongitude = it->getDouble();
+            ++it;
+            double docLatitude = it->getDouble();
+            LOG(3) << "docLongitude " << docLongitude;
+            LOG(3) << "docLatitude " << docLatitude;
+            LOG(3) << "_lonDelta " << _lonDelta;
+            LOG(3) << "_latDelta " << _latDelta;
+            if (_buckets.empty()){
+              LOG(3) << "_buckets.empty " ;
+              Bucket currentBucket(
+                  pExpCtx, docLongitude, docLatitude, _accumulatorFactories);
+              addDocumentToBucket(currentValue, currentBucket);
+              addBucket(currentBucket);
+            } else {
+              LOG(3) << "_buckets.check " ;
+              int isFound = 0;
+              _bucketsIterator = _buckets.begin();
+              Bucket& currentBucket = _buckets.front();
+              while (_bucketsIterator != _buckets.end()) {
+                LOG(3) << "currentBucket_Longitude " << docLongitude;
+                LOG(3) << "currentBucket_Latitude " << docLatitude;
+                LOG(3) << "abs Long" << abs(currentBucket._Longitude - docLongitude);
+                LOG(3) << "abs _Latitude" << abs(currentBucket._Latitude - docLatitude);
+                if(abs(currentBucket._Longitude - docLongitude) < _lonDelta) {
+                  if(abs(currentBucket._Latitude - docLatitude) < _latDelta) {
+                    isFound = 1;
+                    break;
+                  }
+                }
+                
+                currentBucket = *(_bucketsIterator++);
+                LOG(3) << "next ";
+              }
+              if(isFound == 1) {
+                LOG(3) << "match ";
+                addDocumentToBucket(currentValue, currentBucket);
+              } else {
+                LOG(3) << "no match ";
+                Bucket newBucket(
+                  pExpCtx, docLongitude, docLatitude, _accumulatorFactories);
+                addDocumentToBucket(currentValue, newBucket);
+                addBucket(newBucket);
+              }
+            }
+            _nDocuments++;
+        }
+        if (next.isPaused()) {
+            return next;
+        }
+        invariant(next.isEOF());
 
         _populated = true;
         _bucketsIterator = _buckets.begin();
@@ -72,7 +125,7 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
         dispose();
         return GetNextResult::makeEOF();
     }
-
+    LOG(3) << "makeDocument " ;
     return makeDocument(*(_bucketsIterator++));
 }
 
@@ -148,9 +201,6 @@ Value DocumentSourceCluster::extractKey(const Document& doc) {
 // TODO: Add logic here
 void DocumentSourceCluster::addDocumentToBucket(const pair<Value, Document>& entry,
                                                    Bucket& bucket) {
-    //invariant(pExpCtx->getValueComparator().evaluate(entry.first >= bucket._max));
-    //bucket._max = entry.first;
-
     const size_t numAccumulators = _accumulatorFactories.size();
     _variables->setRoot(entry.second);
     for (size_t k = 0; k < numAccumulators; k++) {
@@ -158,87 +208,6 @@ void DocumentSourceCluster::addDocumentToBucket(const pair<Value, Document>& ent
     }
 }
 
-// TODO: Add logic here
-void DocumentSourceCluster::populateBuckets() {
-    invariant(_sorter);
-    _sortedInput.reset(_sorter->done());
-    _sorter.reset();
-
-    // If there are no buckets, then we don't need to populate anything.
-    //if (_nBuckets == 0) {
-    //    return;
-    //}
-
-    // Calculate the approximate bucket size. We attempt to fill each bucket with this many
-    // documents.
-    /*long long approxBucketSize = std::round(double(_nDocuments) / double(_nBuckets));
-
-    if (approxBucketSize < 1) {
-        // If the number of buckets is larger than the number of documents, then we try to make as
-        // many buckets as possible by placing each document in its own bucket.
-        approxBucketSize = 1;
-    }*/
-
-    pair<Value, Document> currentValue;
-
-    while (_sortedInput->more()) {
-      currentValue = _sortedInput->next();
-      
-      //LOG(3) << "populateBuckets " << currentValue ;
-      LOG(3) << "populateBuckets first:" << currentValue.first ;
-      const vector<Value>& locationItem = currentValue.first.getArray();
-      vector<Value>::const_iterator it = locationItem.begin();
-      double docLongitude = it->getDouble();
-      ++it;
-      double docLatitude = it->getDouble();
-      LOG(3) << "docLongitude " << docLongitude;
-      LOG(3) << "docLatitude " << docLatitude;
-      LOG(3) << "_lonDelta " << _lonDelta;
-      LOG(3) << "_latDelta " << _latDelta;
-      if (_buckets.empty()){
-        LOG(3) << "_buckets.empty " ;
-        Bucket currentBucket(
-            pExpCtx, docLongitude, docLatitude, _accumulatorFactories);
-        addDocumentToBucket(currentValue, currentBucket);
-        addBucket(currentBucket);
-      } else {
-        LOG(3) << "_buckets.check " ;
-        int isFound = 0;
-        _bucketsIterator = _buckets.begin();
-        Bucket& currentBucket = _buckets.front();
-        while (_bucketsIterator != _buckets.end()) {
-          LOG(3) << "currentBucket_Longitude " << docLongitude;
-          LOG(3) << "currentBucket_Latitude " << docLatitude;
-          LOG(3) << "abs Long" << abs(currentBucket._Longitude - docLongitude);
-          LOG(3) << "abs _Latitude" << abs(currentBucket._Latitude - docLatitude);
-          if(abs(currentBucket._Longitude - docLongitude) < _lonDelta) {
-            if(abs(currentBucket._Latitude - docLatitude) < _latDelta) {
-              isFound = 1;
-              break;
-            }
-          }
-          
-          currentBucket = *(_bucketsIterator++);
-          LOG(3) << "next ";
-        }
-        if(isFound == 1) {
-          LOG(3) << "match ";
-          addDocumentToBucket(currentValue, currentBucket);
-        } else {
-          LOG(3) << "no match ";
-          Bucket newBucket(
-            pExpCtx, docLongitude, docLatitude, _accumulatorFactories);
-          addDocumentToBucket(currentValue, newBucket);
-          addBucket(newBucket);
-        }
-      }
-
-/*
-      
-      addDocumentToBucket(currentValue, currentBucket);*/
-    }
-
-}
 
 DocumentSourceCluster::Bucket::Bucket(const boost::intrusive_ptr<ExpressionContext>& expCtx,
                                       double Longitude,

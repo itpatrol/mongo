@@ -575,17 +575,6 @@ public:
 };
 
 
-class ExpressionLocation final : public ExpressionVariadic<ExpressionArray> {
-public:
-    explicit ExpressionLocation(const boost::intrusive_ptr<ExpressionContext>& expCtx)
-        : ExpressionVariadic<ExpressionArray>(expCtx) {}
-
-    Value evaluateInternal(Variables* vars) const final;
-    Value serialize(bool explain) const final;
-    const char* getOpName() const final;
-};
-
-
 class ExpressionArrayElemAt final : public ExpressionFixedArity<ExpressionArrayElemAt, 2> {
 public:
     explicit ExpressionArrayElemAt(const boost::intrusive_ptr<ExpressionContext>& expCtx)
