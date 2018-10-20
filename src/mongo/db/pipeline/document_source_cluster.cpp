@@ -36,6 +36,8 @@
 #include "mongo/db/pipeline/lite_parsed_document_source.h"
 #include "mongo/util/log.h"
 
+#include <cmath>
+
 namespace mongo {
 
 using boost::intrusive_ptr;
@@ -87,10 +89,10 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
               while (_bucketsIterator != _buckets.end()) {
                 LOG(3) << "currentBucket_Longitude " << currentBucket._Longitude;
                 LOG(3) << "currentBucket_Latitude " << currentBucket._Latitude;
-                LOG(3) << "abs Long" << abs(currentBucket._Longitude - docLongitude);
-                LOG(3) << "abs _Latitude" << abs(currentBucket._Latitude - docLatitude);
-                if(abs(currentBucket._Longitude - docLongitude) < _lonDelta) {
-                  if(abs(currentBucket._Latitude - docLatitude) < _latDelta) {
+                LOG(3) << "abs Long" << std::abs(currentBucket._Longitude - docLongitude);
+                LOG(3) << "abs _Latitude" << std::abs(currentBucket._Latitude - docLatitude);
+                if(std::abs(currentBucket._Longitude - docLongitude) < _lonDelta) {
+                  if(std::abs(currentBucket._Latitude - docLatitude) < _latDelta) {
                     isFound = 1;
                     break;
                   }
