@@ -85,8 +85,8 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
               _bucketsIterator = _buckets.begin();
               Bucket& currentBucket = _buckets.front();
               while (_bucketsIterator != _buckets.end()) {
-                LOG(3) << "currentBucket_Longitude " << docLongitude;
-                LOG(3) << "currentBucket_Latitude " << docLatitude;
+                LOG(3) << "currentBucket_Longitude " << currentBucket._Longitude;
+                LOG(3) << "currentBucket_Latitude " << currentBucket._Latitude;
                 LOG(3) << "abs Long" << abs(currentBucket._Longitude - docLongitude);
                 LOG(3) << "abs _Latitude" << abs(currentBucket._Latitude - docLatitude);
                 if(abs(currentBucket._Longitude - docLongitude) < _lonDelta) {
