@@ -173,24 +173,36 @@ Value DocumentSourceCluster::extractKey(const Document& doc) {
     Value key = _groupExpression->evaluate(_variables.get());
     LOG(3) << "key :" << key ;
     // TODO check if extracted value match delta
-    uassert(40508,
+    uassert(40509,
                 str::stream() << "$cluster  'groupBy' value type must match"
                               << " with delta type "
                               << typeName(_delta.getType())
                               << " but found a value with type: "
                               << typeName(key.getType()),
                 key.getType() == _delta.getType());
+    if(_delta.getType() == Array) {
+        std::vector<Value> arrayDelta = _delta.getArray();
+        std::vector<Value> arrayKey = key.getArray();
+        uassert(40510,
+                str::stream() << "$cluster  'groupBy' value size type must match"
+                              << " with delta size "
+                              << arrayDelta.size()
+                              << " but found a value with type: "
+                              << arrayKey.size(),
+                arrayKey.size() == arrayDelta.size());
+    }
     // To be consistent with the $group stage, we consider "missing" to be equivalent to null when
     // grouping values into buckets.
     return key.missing() ? Value(BSONNULL) : std::move(key);
 }
 
 bool DocumentSourceCluster::findBucket(const Value& entry) {
+    const bool isNumeric = _delta.numeric();
+    const bool isArray = (_delta.getType() == Array);
     if(_buckets.empty()) {
         return false;
     }
     //const bool mergingOutput = false;
-    const bool isNumeric = _delta.numeric();
     _bucketsIterator = _buckets.begin();
     while(_bucketsIterator != _buckets.end()){
         Bucket& currentBucket = *(_bucketsIterator);
@@ -198,13 +210,48 @@ bool DocumentSourceCluster::findBucket(const Value& entry) {
         LOG(3) << "bucket groupBy " << groupBy;
 
         if(isNumeric) {
-            Value buckDelta = abs(subtract(currentBucket._groupBy, entry));
+          LOG(3) << "isNumeric " ;
+            Value buckDelta = abs(subtract(groupBy, entry));
             LOG(3) << "delta :" << buckDelta ;
             int cmp = pExpCtx->getValueComparator().compare(_delta, buckDelta);
             if(cmp != -1) {
                 LOG(3) << "found :" << groupBy ;
                 return true;
             }
+        } else if (isArray) {
+          LOG(3) << "isArray " ;
+            std::vector<Value> arrayDelta = _delta.getArray();
+            std::vector<Value> arrayGroupBy = groupBy.getArray();
+            std::vector<Value> arrayEntry = entry.getArray();
+            LOG(3) << "arrayDelta :" << _delta ;
+            LOG(3) << "arrayGroupBy :" << groupBy ;
+            LOG(3) << "arrayEntry :" << entry ;
+            if(arrayDelta.size() == arrayGroupBy.size() && arrayGroupBy.size() == arrayEntry.size()){
+                size_t startIndex = 0;
+                size_t endIndex = arrayDelta.size();
+                bool isFound = true;
+                LOG(3) << "startIndex :" << startIndex ;
+                LOG(3) << "endIndex :" << endIndex ;
+                for (size_t i = startIndex; i < endIndex; i++) {
+                    Value buckDelta = abs(subtract(arrayGroupBy[i], arrayEntry[i]));
+                    LOG(3) << "delta :" << buckDelta ;
+                    int cmp = pExpCtx->getValueComparator().compare(arrayDelta[i], buckDelta);
+                    if(cmp == -1) {
+                        LOG(3) << "miss :" << groupBy ;
+                        isFound = false;
+                        break;
+                    }
+                }
+                if(isFound) {
+                  LOG(3) << "found :" << groupBy ;
+                  return true;
+                }
+            } else {
+              LOG(3) << "Dif size arrayDelta :" << arrayDelta.size() ;
+              LOG(3) << "Dif size arrayGroupBy :" << arrayGroupBy.size() ;
+              LOG(3) << "Dif size arrayEntry :" << arrayEntry.size() ;
+            }
+
         }
         _bucketsIterator++;
     }
@@ -219,7 +266,7 @@ Value DocumentSourceCluster::abs(const Value& numericArg) {
         return Value(numericArg.getDecimal().toAbs());
     } else {
         long long num = numericArg.getLong();
-        uassert(40507,
+        uassert(40508,
                 "can't take $abs of long long min",
                 num != std::numeric_limits<long long>::min());
         long long absVal = std::abs(num);
@@ -255,12 +302,12 @@ Value DocumentSourceCluster::subtract(const Value& lhs, const Value& rhs) {
             long long millisSinceEpoch = lhs.getDate() - rhs.coerceToLong();
             return Value(Date_t::fromMillisSinceEpoch(millisSinceEpoch));
         } else {
-            uasserted(40505,
+            uasserted(40506,
                       str::stream() << "cant $subtract a " << typeName(rhs.getType())
                                     << " from a Date");
         }
     } else {
-        uasserted(40506,
+        uasserted(40507,
                   str::stream() << "cant $subtract a" << typeName(rhs.getType()) << " from a "
                                 << typeName(lhs.getType()));
     }
@@ -387,7 +434,7 @@ boost::intrusive_ptr<Expression> parseGroupByExpression(
         return ExpressionFieldPath::parse(expCtx, groupByField.str(), vps);
     } else {
         uasserted(
-            40504,
+            40505,
             str::stream() << "The $cluster 'groupBy' field must be defined as a $-prefixed "
                              "path or an expression object, but found: "
                           << groupByField.toString(false, false));
@@ -416,10 +463,29 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
           groupExpression = parseGroupByExpression(pExpCtx, argument, vps);
         }  else if ("delta" == argName) {
           Delta = Value(argument);
+          if(!Delta.numeric()){
+              uassert(
+                  40501,
+                  str::stream() << "The $cluster 'delta' field must be a numeric or array of numeric, but found type: "
+                                << typeName(Delta.getType())
+                                << ".",
+                  Delta.getType() == Array);
+              std::vector<Value> arrayDelta = Delta.getArray();
+              size_t startIndex = 0;
+              size_t endIndex = arrayDelta.size();
+              for (size_t i = startIndex; i < endIndex; i++) {
+                  uassert(
+                      40511,
+                      str::stream() << "The $cluster 'delta' array item must be a numeric,"               << "but found type: "
+                                    << typeName(arrayDelta[i].getType())
+                                    << ".",
+                      arrayDelta[i].numeric());
+              }
+          }
           isDelta = true;
         } else if ("output" == argName) {
             uassert(
-                40501,
+                40502,
                 str::stream() << "The $cluster 'output' field must be an object, but found type: "
                               << typeName(argument.type())
                               << ".",
@@ -430,11 +496,11 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
                     AccumulationStatement::parseAccumulationStatement(pExpCtx, outputField, vps));
             }
         } else {
-            uasserted(40502, str::stream() << "Unrecognized option to $cluster: " << argName << ".");
+            uasserted(40503, str::stream() << "Unrecognized option to $cluster: " << argName << ".");
         }
     }
     
-    uassert(40503,
+    uassert(40504,
             "$cluster requires 'groupBy' and 'delta' to be specified",
             groupExpression && isDelta );
 
