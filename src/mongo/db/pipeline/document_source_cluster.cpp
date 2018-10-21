@@ -59,13 +59,29 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
     LOG(3) << "getNext " ;
 
     if (!_populated) {
-        pair<Value, Document> currentValue;
+        pair<Value, Document> currentPair;
+        Value currentValue;
+        bool isBacketFound = false;
         auto next = pSource->getNext();
         for (; next.isAdvanced(); next = pSource->getNext()) {
             auto nextDoc = next.releaseDocument();
+            currentValue = extractKey(nextDoc);
+            currentPair = std::make_pair(currentValue, nextDoc);
+            
+            LOG(3) << "getNext first:" << currentValue;
 
-            currentValue = std::make_pair(extractKey(nextDoc), nextDoc);
-            LOG(3) << "getNext first:" << currentValue.first ;
+            isBacketFound = findBucket(currentValue);
+            if(!isBacketFound) {
+              Bucket currentBucket(
+                  pExpCtx, currentValue, _accumulatorFactories);
+              addDocumentToBucket(currentPair, currentBucket);
+              addBucket(currentBucket);
+            } else {
+              Bucket& currentBucket = *(_bucketsIterator);
+              addDocumentToBucket(currentPair, currentBucket);
+            }
+            
+/*
             const vector<Value>& locationItem = currentValue.first.getArray();
             vector<Value>::const_iterator it = locationItem.begin();
             double docLongitude = it->getDouble();
@@ -112,6 +128,7 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
                 addBucket(newBucket);
               }
             }
+*/
             _nDocuments++;
         }
         if (next.isPaused()) {
@@ -134,7 +151,7 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
 // TODO: Add logic here
 DocumentSource::GetDepsReturn DocumentSourceCluster::getDependencies(DepsTracker* deps) const {
     // Add the 'groupBy' expression.
-    _locationExpression->addDependencies(deps);
+    _groupExpression->addDependencies(deps);
 
     // Add the 'output' fields.
     for (auto&& exp : _expressions) {
@@ -147,62 +164,110 @@ DocumentSource::GetDepsReturn DocumentSourceCluster::getDependencies(DepsTracker
     return EXHAUSTIVE_ALL;
 }
 
-
-DocumentSource::GetNextResult DocumentSourceCluster::populateSorter() {
-    if (!_sorter) {
-        SortOptions opts;
-        opts.maxMemoryUsageBytes = _maxMemoryUsageBytes;
-        if (pExpCtx->extSortAllowed && !pExpCtx->inRouter) {
-            opts.extSortAllowed = true;
-            opts.tempDir = pExpCtx->tempDir;
-        }
-        const auto& valueCmp = pExpCtx->getValueComparator();
-        auto comparator = [valueCmp](const Sorter<Value, Document>::Data& lhs,
-                                     const Sorter<Value, Document>::Data& rhs) {
-            return valueCmp.compare(lhs.first, rhs.first);
-        };
-
-        _sorter.reset(Sorter<Value, Document>::make(opts, comparator));
-    }
-
-    auto next = pSource->getNext();
-    for (; next.isAdvanced(); next = pSource->getNext()) {
-        auto nextDoc = next.releaseDocument();
-        _sorter->add(extractKey(nextDoc), nextDoc);
-        _nDocuments++;
-    }
-    return next;
-}
-
-
 Value DocumentSourceCluster::extractKey(const Document& doc) {
-    if (!_locationExpression) {
+    if (!_groupExpression) {
         return Value(BSONNULL);
     }
 
     _variables->setRoot(doc);
-    Value key = _locationExpression->evaluate(_variables.get());
-    uassert(40507,
-                str::stream() << "$cluster can specify a 'location' with array "
-                                 "only, but found a value with type: "
-                              << typeName(key.getType()),
-                key.getType() == Array);
-    const vector<Value>& vec = key.getArray();
+    Value key = _groupExpression->evaluate(_variables.get());
     LOG(3) << "key :" << key ;
+    // TODO check if extracted value match delta
     uassert(40508,
-                str::stream() << "$cluster can specify a 'location' with array of two items "
-                                 "only, but found : "
-                              << vec.size(),
-                vec.size() == 2);
-
+                str::stream() << "$cluster  'groupBy' value type must match"
+                              << " with delta type "
+                              << typeName(_delta.getType())
+                              << " but found a value with type: "
+                              << typeName(key.getType()),
+                key.getType() == _delta.getType());
     // To be consistent with the $group stage, we consider "missing" to be equivalent to null when
     // grouping values into buckets.
     return key.missing() ? Value(BSONNULL) : std::move(key);
 }
 
-// TODO: Add logic here
+bool DocumentSourceCluster::findBucket(const Value& entry) {
+    if(_buckets.empty()) {
+        return false;
+    }
+    //const bool mergingOutput = false;
+    const bool isNumeric = _delta.numeric();
+    _bucketsIterator = _buckets.begin();
+    while(_bucketsIterator != _buckets.end()){
+        Bucket& currentBucket = *(_bucketsIterator);
+        Value groupBy = currentBucket._groupBy;
+        LOG(3) << "bucket groupBy " << groupBy;
+
+        if(isNumeric) {
+            Value buckDelta = abs(subtract(currentBucket._groupBy, entry));
+            LOG(3) << "delta :" << buckDelta ;
+            int cmp = pExpCtx->getValueComparator().compare(_delta, buckDelta);
+            if(cmp != -1) {
+                LOG(3) << "found :" << groupBy ;
+                return true;
+            }
+        }
+        _bucketsIterator++;
+    }
+    LOG(3) << "not found :" << entry ;
+    return false;
+}
+Value DocumentSourceCluster::abs(const Value& numericArg) {
+    BSONType type = numericArg.getType();
+    if (type == NumberDouble) {
+        return Value(std::abs(numericArg.getDouble()));
+    } else if (type == NumberDecimal) {
+        return Value(numericArg.getDecimal().toAbs());
+    } else {
+        long long num = numericArg.getLong();
+        uassert(40507,
+                "can't take $abs of long long min",
+                num != std::numeric_limits<long long>::min());
+        long long absVal = std::abs(num);
+        return type == NumberLong ? Value(absVal) : Value::createIntOrLong(absVal);
+    }
+}
+Value DocumentSourceCluster::subtract(const Value& lhs, const Value& rhs) {
+    BSONType diffType = Value::getWidestNumeric(rhs.getType(), lhs.getType());
+
+    if (diffType == NumberDecimal) {
+        Decimal128 right = rhs.coerceToDecimal();
+        Decimal128 left = lhs.coerceToDecimal();
+        return Value(left.subtract(right));
+    } else if (diffType == NumberDouble) {
+        double right = rhs.coerceToDouble();
+        double left = lhs.coerceToDouble();
+        return Value(left - right);
+    } else if (diffType == NumberLong) {
+        long long right = rhs.coerceToLong();
+        long long left = lhs.coerceToLong();
+        return Value(left - right);
+    } else if (diffType == NumberInt) {
+        long long right = rhs.coerceToLong();
+        long long left = lhs.coerceToLong();
+        return Value::createIntOrLong(left - right);
+    } else if (lhs.nullish() || rhs.nullish()) {
+        return Value(BSONNULL);
+    } else if (lhs.getType() == Date) {
+        if (rhs.getType() == Date) {
+            long long timeDelta = lhs.getDate() - rhs.getDate();
+            return Value(timeDelta);
+        } else if (rhs.numeric()) {
+            long long millisSinceEpoch = lhs.getDate() - rhs.coerceToLong();
+            return Value(Date_t::fromMillisSinceEpoch(millisSinceEpoch));
+        } else {
+            uasserted(40505,
+                      str::stream() << "cant $subtract a " << typeName(rhs.getType())
+                                    << " from a Date");
+        }
+    } else {
+        uasserted(40506,
+                  str::stream() << "cant $subtract a" << typeName(rhs.getType()) << " from a "
+                                << typeName(lhs.getType()));
+    }
+}
+
 void DocumentSourceCluster::addDocumentToBucket(const pair<Value, Document>& entry,
-                                                   Bucket& bucket) {
+                                                Bucket& bucket) {
     const size_t numAccumulators = _accumulatorFactories.size();
     _variables->setRoot(entry.second);
     for (size_t k = 0; k < numAccumulators; k++) {
@@ -210,12 +275,10 @@ void DocumentSourceCluster::addDocumentToBucket(const pair<Value, Document>& ent
     }
 }
 
-
 DocumentSourceCluster::Bucket::Bucket(const boost::intrusive_ptr<ExpressionContext>& expCtx,
-                                      double Longitude,
-                                      double Latitude,
+                                      Value groupBy,
                                       vector<Accumulator::Factory> accumulatorFactories)
-    : _Longitude(Longitude), _Latitude(Latitude) {
+    : _groupBy(groupBy) {
     _accums.reserve(accumulatorFactories.size());
     for (auto&& factory : accumulatorFactories) {
         _accums.push_back(factory(expCtx));
@@ -230,7 +293,7 @@ Document DocumentSourceCluster::makeDocument(const Bucket& bucket) {
     const size_t nAccumulatedFields = _fieldNames.size();
     MutableDocument out(1 + nAccumulatedFields);
 
-    out.addField("_id", Value{Document{{"Longitude", bucket._Longitude}, {"Latitude", bucket._Latitude}}});
+    out.addField("_id", bucket._groupBy);
 
     const bool mergingOutput = false;
     for (size_t i = 0; i < nAccumulatedFields; i++) {
@@ -252,9 +315,8 @@ void DocumentSourceCluster::dispose() {
 Value DocumentSourceCluster::serialize(bool explain) const {
     MutableDocument insides;
 
-    insides["location"] = _locationExpression->serialize(explain);
-    insides["lonDelta"] = Value(_lonDelta);
-    insides["latDelta"] = Value(_latDelta);
+    insides["groupBy"] = _groupExpression->serialize(explain);
+    insides["delta"] = Value(_delta);
 
     const size_t nOutputFields = _fieldNames.size();
     MutableDocument outputSpec(nOutputFields);
@@ -271,10 +333,9 @@ Value DocumentSourceCluster::serialize(bool explain) const {
 
 intrusive_ptr<DocumentSourceCluster> DocumentSourceCluster::create(
     const intrusive_ptr<ExpressionContext>& pExpCtx,
-    const boost::intrusive_ptr<Expression>& locationExpression,
+    const boost::intrusive_ptr<Expression>& groupExpression,
     Variables::Id numVariables,
-    double lonDelta,
-    double latDelta,
+    Value Delta,
     std::vector<AccumulationStatement> accumulationStatements,
     uint64_t maxMemoryUsageBytes) {
     // If there is no output field specified, then add the default one.
@@ -284,28 +345,25 @@ intrusive_ptr<DocumentSourceCluster> DocumentSourceCluster::create(
                                             ExpressionConstant::create(pExpCtx, Value(1)));
     }
     return new DocumentSourceCluster(pExpCtx,
-                                        locationExpression,
+                                        groupExpression,
                                         numVariables,
-                                        lonDelta,
-                                        latDelta,
+                                        Delta,
                                         accumulationStatements,
                                         maxMemoryUsageBytes);
 }
 
 DocumentSourceCluster::DocumentSourceCluster(
     const intrusive_ptr<ExpressionContext>& pExpCtx,
-    const boost::intrusive_ptr<Expression>& locationExpression,
+    const boost::intrusive_ptr<Expression>& groupExpression,
     Variables::Id numVariables,
-    double lonDelta,
-    double latDelta,
+    Value Delta,
     std::vector<AccumulationStatement> accumulationStatements,
     uint64_t maxMemoryUsageBytes)
     : DocumentSource(pExpCtx),
-      _lonDelta(lonDelta),
-      _latDelta(latDelta),
+      _delta(Delta),
       _maxMemoryUsageBytes(maxMemoryUsageBytes),
       _variables(stdx::make_unique<Variables>(numVariables)),
-      _locationExpression(locationExpression) {
+      _groupExpression(groupExpression) {
 
     invariant(!accumulationStatements.empty());
     for (auto&& accumulationStatement : accumulationStatements) {
@@ -317,22 +375,22 @@ DocumentSourceCluster::DocumentSourceCluster(
 
 namespace {
 
-boost::intrusive_ptr<Expression> parselocationExpression(
+boost::intrusive_ptr<Expression> parseGroupByExpression(
     const boost::intrusive_ptr<ExpressionContext>& expCtx,
-    const BSONElement& locationField,
+    const BSONElement& groupByField,
     const VariablesParseState& vps) {
-    if (locationField.type() == BSONType::Object &&
-        locationField.embeddedObject().firstElementFieldName()[0] == '$') {
-        return Expression::parseObject(expCtx, locationField.embeddedObject(), vps);
-    } else if (locationField.type() == BSONType::String &&
-               locationField.valueStringData()[0] == '$') {
-        return ExpressionFieldPath::parse(expCtx, locationField.str(), vps);
+    if (groupByField.type() == BSONType::Object &&
+        groupByField.embeddedObject().firstElementFieldName()[0] == '$') {
+        return Expression::parseObject(expCtx, groupByField.embeddedObject(), vps);
+    } else if (groupByField.type() == BSONType::String &&
+               groupByField.valueStringData()[0] == '$') {
+        return ExpressionFieldPath::parse(expCtx, groupByField.str(), vps);
     } else {
         uasserted(
-            40506,
-            str::stream() << "The $cluster 'location' field must be defined as a $-prefixed "
+            40504,
+            str::stream() << "The $cluster 'groupBy' field must be defined as a $-prefixed "
                              "path or an expression object, but found: "
-                          << locationField.toString(false, false));
+                          << groupByField.toString(false, false));
     }
 }
 }  // namespace
@@ -348,37 +406,20 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
     VariablesIdGenerator idGenerator;
     VariablesParseState vps(&idGenerator);
     vector<AccumulationStatement> accumulationStatements;
-    boost::intrusive_ptr<Expression> locationExpression;
-    boost::optional<double> latDelta;
-    boost::optional<double> lonDelta;
+    boost::intrusive_ptr<Expression> groupExpression;
+    Value Delta;
+    bool isDelta = false;
 
     for (auto&& argument : elem.Obj()) {
         const auto argName = argument.fieldNameStringData();
-        if ("location" == argName) {
-          locationExpression = parselocationExpression(pExpCtx, argument, vps);
-        }  else if ("lonDelta" == argName) {
-          Value argValue = Value(argument);
-          uassert(
-                40501,
-                str::stream()
-                    << "The $cluster 'lonDelta' field must be a numeric value, but found type: "
-                    << typeName(argument.type()),
-                argValue.numeric());
-          lonDelta = argValue.coerceToDouble();
-            
-        } else if ("latDelta" == argName) {
-          Value argValue = Value(argument);
-          uassert(
-                40502,
-                str::stream()
-                    << "The $cluster 'latDelta' field must be a numeric value, but found type: "
-                    << typeName(argument.type()),
-                argValue.numeric());
-          latDelta = argValue.coerceToDouble();
-            
+        if ("groupBy" == argName) {
+          groupExpression = parseGroupByExpression(pExpCtx, argument, vps);
+        }  else if ("delta" == argName) {
+          Delta = Value(argument);
+          isDelta = true;
         } else if ("output" == argName) {
             uassert(
-                40503,
+                40501,
                 str::stream() << "The $cluster 'output' field must be an object, but found type: "
                               << typeName(argument.type())
                               << ".",
@@ -389,19 +430,18 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
                     AccumulationStatement::parseAccumulationStatement(pExpCtx, outputField, vps));
             }
         } else {
-            uasserted(40504, str::stream() << "Unrecognized option to $cluster: " << argName << ".");
+            uasserted(40502, str::stream() << "Unrecognized option to $cluster: " << argName << ".");
         }
     }
     
-    uassert(40505,
-            "$cluster requires 'location', 'lonDelta' and 'latDelta' to be specified",
-            locationExpression && lonDelta && latDelta);
+    uassert(40503,
+            "$cluster requires 'groupBy' and 'delta' to be specified",
+            groupExpression && isDelta );
 
     return DocumentSourceCluster::create(pExpCtx,
-                                            locationExpression,
+                                            groupExpression,
                                             idGenerator.getIdCount(),
-                                            lonDelta.get(),
-                                            latDelta.get(),
+                                            Delta,
                                             accumulationStatements);
 }
 }  // namespace mongo

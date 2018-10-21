@@ -59,6 +59,7 @@ public:
 
     static const uint64_t kDefaultMaxMemoryUsageBytes = 100 * 1024 * 1024;
 
+    
     /**
      * Convenience method to create a $cluster stage.
      *
@@ -67,10 +68,9 @@ public:
      */
     static boost::intrusive_ptr<DocumentSourceCluster> create(
         const boost::intrusive_ptr<ExpressionContext>& expCtx,
-        const boost::intrusive_ptr<Expression>& locationExpression,
+        const boost::intrusive_ptr<Expression>& groupExpression,
         Variables::Id numVariables,
-        double lonDelta,
-        double latDelta,
+        Value Delta,
         std::vector<AccumulationStatement> accumulationStatements = {},
         uint64_t maxMemoryUsageBytes = kDefaultMaxMemoryUsageBytes);
 
@@ -82,31 +82,20 @@ public:
 
 private:
     DocumentSourceCluster(const boost::intrusive_ptr<ExpressionContext>& pExpCtx,
-                          const boost::intrusive_ptr<Expression>& locationExpression,
+                          const boost::intrusive_ptr<Expression>& groupExpression,
                           Variables::Id numVariables,
-                          double lonDelta,
-                          double latDelta,
+                          Value Delta,
                           std::vector<AccumulationStatement> accumulationStatements,
                           uint64_t maxMemoryUsageBytes);
 
     // struct for holding information about a bucket.
     struct Bucket {
         Bucket(const boost::intrusive_ptr<ExpressionContext>& expCtx,
-                double Longitude,
-                double Latitude,
+                Value groupBy,
                 std::vector<Accumulator::Factory> accumulatorFactories);
-        double _Longitude;
-        double _Latitude;
+        Value _groupBy;
         std::vector<boost::intrusive_ptr<Accumulator>> _accums;
     };
-
-    /**
-     * Consumes all of the documents from the source in the pipeline and sorts them by their
-     * 'location' value. This method might not be able to finish populating the sorter in a single
-     * call if 'pSource' returns a DocumentSource::GetNextResult::kPauseExecution, so this returns
-     * the last GetNextResult encountered, which may be either kEOF or kPauseExecution.
-     */
-    GetNextResult populateSorter();
 
     /**
      * Computes the 'location' expression value for 'doc'.
@@ -124,6 +113,21 @@ private:
     void addBucket(Bucket& newBucket);
 
     /**
+     * Find 'bucket' in _buckets based on document.
+     */
+    bool findBucket(const Value& entry);
+
+    /**
+     * Apply ABS on value.
+     */
+    Value abs(const Value& numericArg);
+
+    /**
+     * Calculate delta between two values by subtracting them.
+     */
+    Value subtract(const Value& lhs, const Value& rhs);
+
+    /**
      * Makes a document using the information from bucket. This is what is returned when getNext()
      * is called.
      */
@@ -137,18 +141,18 @@ private:
     // expressions used by each instance of each accumulator in order to find the right-hand side of
     // what gets added to the accumulator. These three vectors parallel each other.
     std::vector<std::string> _fieldNames;
+    Value _delta;
     std::vector<Accumulator::Factory> _accumulatorFactories;
     std::vector<boost::intrusive_ptr<Expression>> _expressions;
 
     int _nBuckets = 0;
-    double _lonDelta;
-    double _latDelta;
+
     uint64_t _maxMemoryUsageBytes;
     bool _populated = false;
     std::vector<Bucket> _buckets;
     std::vector<Bucket>::iterator _bucketsIterator;
     std::unique_ptr<Variables> _variables;
-    boost::intrusive_ptr<Expression> _locationExpression;
+    boost::intrusive_ptr<Expression> _groupExpression;
     long long _nDocuments = 0;
 };
 
