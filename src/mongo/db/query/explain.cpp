@@ -532,6 +532,14 @@ void Explain::statsToBSON(const PlanStageStats& stats,
             bob->appendBool("wouldInsert", spec->inserted);
             bob->appendBool("fastmodinsert", spec->fastmodinsert);
         }
+    } else if (STAGE_TEXT_AND == stats.stageType) {
+        TextAndStats* spec = static_cast<TextAndStats*>(stats.specific.get());
+
+        if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
+            bob->appendNumber("dupsTested", spec->dupsTested);
+            bob->appendNumber("dupsDropped", spec->dupsDropped);
+            bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
+        }
     }
 
     // We're done if there are no children.

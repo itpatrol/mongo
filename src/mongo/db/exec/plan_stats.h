@@ -686,4 +686,23 @@ struct TextOrStats : public SpecificStats {
     size_t fetches;
 };
 
+
+struct TextAndStats : public SpecificStats {
+    TextAndStats() 
+        : dupsTested(0),
+          dupsDropped(0),
+          recordIdsForgotten(0) {}
+
+    SpecificStats* clone() const final {
+        TextAndStats* specific = new TextAndStats(*this);
+        return specific;
+    }
+
+    size_t dupsTested;
+    size_t dupsDropped;
+
+    // How many calls to invalidate(...) actually removed a RecordId from our deduping map?
+    size_t recordIdsForgotten;
+};
+
 }  // namespace mongo

@@ -106,6 +106,7 @@ enum StageType {
     STAGE_TEXT,
     STAGE_TEXT_OR,
     STAGE_TEXT_MATCH,
+    STAGE_TEXT_AND,
 
     STAGE_UNKNOWN,
 
