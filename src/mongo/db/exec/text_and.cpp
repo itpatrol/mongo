@@ -51,13 +51,17 @@ TextAndStage::TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, 
       _filter(filter),
       _intersectingChildren(true),
       _currentChild(0),
-      _dedup(dedup) {}
+      _dedup(dedup){}
 
 void TextAndStage::addChild(PlanStage* child) {
     _children.emplace_back(child);
+    _specificStats._counter.push_back(0)
 }
 
 void TextAndStage::addChildren(Children childrenToAdd) {
+    for (size_t i = 0; i < childrenToAdd.size(); ++i) {
+      _specificStats._counter.push_back(0);
+    }
     _children.insert(_children.end(),
                      std::make_move_iterator(childrenToAdd.begin()),
                      std::make_move_iterator(childrenToAdd.end()));
@@ -76,11 +80,16 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
         return PlanStage::IS_EOF;
     }
 
+    
+
     WorkingSetID id = WorkingSet::INVALID_ID;
     StageState childStatus = _children[_currentChild]->work(&id);
 
     if (PlanStage::ADVANCED == childStatus) {
+        
         WorkingSetMember* member = _ws->get(id);
+
+        ++_specificStats._counter[_currentChild]
 
         // If we're deduping (and there's something to dedup by)
         if (_dedup && member->hasRecordId()) {

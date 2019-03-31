@@ -539,6 +539,10 @@ void Explain::statsToBSON(const PlanStageStats& stats,
             bob->appendNumber("dupsTested", spec->dupsTested);
             bob->appendNumber("dupsDropped", spec->dupsDropped);
             bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
+            for (size_t i = 0; i < spec->_counter.size(); ++i) {
+                bob->appendNumber(string(stream() << "childCounter_" << i),
+                                  spec->_counter[i]);
+            }
         }
     }
 

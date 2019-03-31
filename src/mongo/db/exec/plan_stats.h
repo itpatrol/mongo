@@ -691,6 +691,7 @@ struct TextAndStats : public SpecificStats {
     TextAndStats() 
         : dupsTested(0),
           dupsDropped(0),
+          _counter(0),
           recordIdsForgotten(0) {}
 
     SpecificStats* clone() const final {
@@ -700,6 +701,8 @@ struct TextAndStats : public SpecificStats {
 
     size_t dupsTested;
     size_t dupsDropped;
+
+    std::vector<size_t> _counter;
 
     // How many calls to invalidate(...) actually removed a RecordId from our deduping map?
     size_t recordIdsForgotten;
