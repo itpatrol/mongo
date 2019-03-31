@@ -122,6 +122,18 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
 
         if (Filter::passes(member, _filter)) {
             // Match!  return it.
+            // We read the first child into our hash table.
+            if(0 == _currentChild) {
+              if (!_dataMap.insert(std::make_pair(member->recordId, id)).second) {
+                // Didn't insert because we already had this RecordId inside the map. This should only
+                // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
+                // Throw out the newer copy of the doc.
+                _ws->free(id);
+                return PlanStage::NEED_TIME;
+              }
+              member->makeObjOwnedIfNeeded();
+              return PlanStage::NEED_TIME;
+            }
             *out = id;
             return PlanStage::ADVANCED;
         } else {
@@ -129,21 +141,7 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             _ws->free(id);
             return PlanStage::NEED_TIME;
         }
-
-        // We read the first child into our hash table.
-        if(0 == _currentChild) {
-          if (!_dataMap.insert(std::make_pair(member->recordId, id)).second) {
-            // Didn't insert because we already had this RecordId inside the map. This should only
-            // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
-            // Throw out the newer copy of the doc.
-            _ws->free(id);
-            return PlanStage::NEED_TIME;
-          }
-          member->makeObjOwnedIfNeeded();
-          return PlanStage::NEED_TIME;
-        }
     } else if (PlanStage::IS_EOF == childStatus) {
-        // Done with _currentChild, move to the next one.
         
         // Done with second or more child
         if(0 < _currentChild) {
@@ -168,6 +166,7 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
           _dataMap.clear();
         }
 
+        // Done with _currentChild, move to the next one.
         ++_currentChild;
 
 
