@@ -72,6 +72,12 @@ bool TextAndStage::isEOF() {
     if (_intersectingChildren) {
         return false;
     }
+
+    // If there's nothing to probe against, we're EOF.
+    if (_dataMap.empty()) {
+        return true;
+    }
+
     return _currentChild >= _children.size();
 }
 
@@ -89,21 +95,28 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
         
         WorkingSetMember* member = _ws->get(id);
 
-        ++_specificStats._counter[_currentChild]
+        ++_specificStats._counter[_currentChild];
 
         // If we're deduping (and there's something to dedup by)
         if (_dedup && member->hasRecordId()) {
+            // On second and other child - check for _dataMap
+            if(0 < _currentChild) {
+              DataMap::iterator it = _dataMap.find(member->recordId);
+              if (_dataMap.end() == it) {
+                _ws->free(id);
+                return PlanStage::NEED_TIME;
+              }
+            }
             ++_specificStats.dupsTested;
-
             // ...and we've seen the RecordId before
-            if (_seen.end() != _seen.find(member->recordId)) {
+            if (_seenMap.end() != _seenMap.find(member->recordId)) {
                 // ...drop it.
                 ++_specificStats.dupsDropped;
                 _ws->free(id);
                 return PlanStage::NEED_TIME;
             } else {
                 // Otherwise, note that we've seen it.
-                _seen.insert(member->recordId);
+                _seenMap.insert(member->recordId);
             }
         }
 
@@ -116,9 +129,44 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             _ws->free(id);
             return PlanStage::NEED_TIME;
         }
+
+        // We read the first child into our hash table.
+        if(0 == _currentChild) {
+          if (!_dataMap.insert(std::make_pair(member->recordId, id)).second) {
+            // Didn't insert because we already had this RecordId inside the map. This should only
+            // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
+            // Throw out the newer copy of the doc.
+            _ws->free(id);
+            return PlanStage::NEED_TIME;
+          }
+          member->makeObjOwnedIfNeeded();
+          return PlanStage::NEED_TIME;
+        }
     } else if (PlanStage::IS_EOF == childStatus) {
         // Done with _currentChild, move to the next one.
         ++_currentChild;
+
+        // Done with second or more child
+        if(1 < _currentChild) {
+            DataMap::iterator it = _dataMap.begin();
+            while (it != _dataMap.end()) {
+                if (_seenMap.end() == _seenMap.find(it->first)) {
+                    DataMap::iterator toErase = it;
+                    ++it;
+
+                    _ws->free(toErase->second);
+                    _dataMap.erase(toErase);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        _seenMap.clear();
+        // Last child. Do cleanup
+        if(_currentChild == _children.size() - 1) {
+          _intersectingChildren = false;
+          _dataMap.clear();
+        }
 
         // Maybe we're out of children.
         if (isEOF()) {
@@ -149,11 +197,24 @@ void TextAndStage::doInvalidate(OperationContext* opCtx, const RecordId& dl, Inv
     // If we see DL again it is not the same record as it once was so we still want to
     // return it.
     if (_dedup && INVALIDATION_DELETION == type) {
-        unordered_set<RecordId, RecordId::Hasher>::iterator it = _seen.find(dl);
-        if (_seen.end() != it) {
+        SeenMap::iterator it = _seenMap.find(dl);
+        if (_seenMap.end() != it) {
             ++_specificStats.recordIdsForgotten;
-            _seen.erase(dl);
+            _seenMap.erase(dl);
         }
+    }
+
+    DataMap::iterator it = _dataMap.find(dl);
+    if (_dataMap.end() != it) {
+        WorkingSetID id = it->second;
+        WorkingSetMember* member = _ws->get(id);
+        verify(member->recordId == dl);
+
+        // Add the WSID to the to-be-reviewed list in the WS.
+        _ws->flagForReview(id);
+
+        // And don't return it from this stage.
+        _dataMap.erase(it);
     }
 }
 

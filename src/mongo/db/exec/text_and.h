@@ -31,10 +31,13 @@
 
 #pragma once
 
+#include <vector>
+
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/matcher/expression.h"
 #include "mongo/db/record_id.h"
+#include "mongo/platform/unordered_map.h"
 #include "mongo/platform/unordered_set.h"
 
 namespace mongo {
@@ -77,6 +80,16 @@ private:
     // The filter is not owned by us.
     const MatchExpression* _filter;
 
+    // _dataMap is filled out by the first child and probed by subsequent children.  This is the
+    // hash table that we create by intersecting _children and probe with the last child.
+    typedef unordered_map<RecordId, WorkingSetID, RecordId::Hasher> DataMap;
+    DataMap _dataMap;
+
+    // Keeps track of what elements from _dataMap subsequent children have seen.
+    // Only used while _hashingChildren.
+    typedef unordered_set<RecordId, RecordId::Hasher> SeenMap;
+    SeenMap _seenMap;
+
     // True if we're still intersecting _children[0..._children.size()-1].
     bool _intersectingChildren;
 
@@ -85,9 +98,6 @@ private:
 
     // True if we dedup on RecordId, false otherwise.
     bool _dedup;
-
-    // Which RecordIds have we returned?
-    unordered_set<RecordId, RecordId::Hasher> _seen;
 
     // Stats
     TextAndStats _specificStats;
