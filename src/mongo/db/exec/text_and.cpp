@@ -55,7 +55,7 @@ TextAndStage::TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, 
 
 void TextAndStage::addChild(PlanStage* child) {
     _children.emplace_back(child);
-    _specificStats._counter.push_back(0)
+    _specificStats._counter.push_back(0);
 }
 
 void TextAndStage::addChildren(Children childrenToAdd) {
