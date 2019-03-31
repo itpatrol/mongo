@@ -144,10 +144,9 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
         }
     } else if (PlanStage::IS_EOF == childStatus) {
         // Done with _currentChild, move to the next one.
-        ++_currentChild;
-
+        
         // Done with second or more child
-        if(1 < _currentChild) {
+        if(0 < _currentChild) {
             DataMap::iterator it = _dataMap.begin();
             while (it != _dataMap.end()) {
                 if (_seenMap.end() == _seenMap.find(it->first)) {
@@ -162,11 +161,15 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             }
         }
         _seenMap.clear();
+        
         // Last child. Do cleanup
         if(_currentChild == _children.size() - 1) {
           _intersectingChildren = false;
           _dataMap.clear();
         }
+
+        ++_currentChild;
+
 
         // Maybe we're out of children.
         if (isEOF()) {
