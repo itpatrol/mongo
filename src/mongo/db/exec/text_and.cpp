@@ -30,7 +30,6 @@
 
 #include "mongo/db/exec/text_and.h"
 
-#include "mongo/db/exec/filter.h"
 #include "mongo/db/exec/scoped_timer.h"
 #include "mongo/db/exec/working_set_common.h"
 #include "mongo/stdx/memory.h"
@@ -45,10 +44,9 @@ using stdx::make_unique;
 // static
 const char* TextAndStage::kStageType = "TEXT_AND";
 
-TextAndStage::TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, const MatchExpression* filter)
+TextAndStage::TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup)
     : PlanStage(kStageType, opCtx),
       _ws(ws),
-      _filter(filter),
       _intersectingChildren(true),
       _currentChild(0),
       _dedup(dedup){}
@@ -120,27 +118,20 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             }
         }
 
-        if (Filter::passes(member, _filter)) {
-            // Match!  return it.
-            // We read the first child into our hash table.
-            if(0 == _currentChild) {
-              if (!_dataMap.insert(std::make_pair(member->recordId, id)).second) {
-                // Didn't insert because we already had this RecordId inside the map. This should only
-                // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
-                // Throw out the newer copy of the doc.
-                _ws->free(id);
-                return PlanStage::NEED_TIME;
-              }
-              member->makeObjOwnedIfNeeded();
-              return PlanStage::NEED_TIME;
-            }
-            *out = id;
-            return PlanStage::ADVANCED;
-        } else {
-            // Does not match, try again.
+        // We read the first child into our hash table.
+        if(0 == _currentChild) {
+          if (!_dataMap.insert(std::make_pair(member->recordId, id)).second) {
+            // Didn't insert because we already had this RecordId inside the map. This should only
+            // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
+            // Throw out the newer copy of the doc.
             _ws->free(id);
             return PlanStage::NEED_TIME;
+          }
+          member->makeObjOwnedIfNeeded();
+          return PlanStage::NEED_TIME;
         }
+        *out = id;
+        return PlanStage::ADVANCED;
     } else if (PlanStage::IS_EOF == childStatus) {
         
         // Done with second or more child
@@ -159,6 +150,12 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             }
         }
         _seenMap.clear();
+
+        // If we have nothing to AND with after finishing any child, stop.
+        if (_dataMap.empty()) {
+            _intersectingChildren = false;
+            return PlanStage::IS_EOF;
+        }
         
         // Last child. Do cleanup
         if(_currentChild == _children.size() - 1) {
@@ -222,13 +219,6 @@ void TextAndStage::doInvalidate(OperationContext* opCtx, const RecordId& dl, Inv
 
 unique_ptr<PlanStageStats> TextAndStage::getStats() {
     _commonStats.isEOF = isEOF();
-
-    // Add a BSON representation of the filter to the stats tree, if there is one.
-    if (NULL != _filter) {
-        BSONObjBuilder bob;
-        _filter->serialize(&bob);
-        _commonStats.filter = bob.obj();
-    }
 
     unique_ptr<PlanStageStats> ret = make_unique<PlanStageStats>(_commonStats, STAGE_TEXT_AND);
     ret->specific = make_unique<TextAndStats>(_specificStats);

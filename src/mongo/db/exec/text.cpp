@@ -133,7 +133,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
     } else {
         // Because we don't need the text score, we can use a non-blocking OR stage to get the union
         // of the index scans.
-        auto textSearcher = make_unique<TextAndStage>(opCtx, ws, true, filter);
+        auto textSearcher = make_unique<TextAndStage>(opCtx, ws, true);
 
         textSearcher->addChildren(std::move(indexScanList));
 

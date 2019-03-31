@@ -35,7 +35,6 @@
 
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/jsobj.h"
-#include "mongo/db/matcher/expression.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/unordered_map.h"
 #include "mongo/platform/unordered_set.h"
@@ -51,7 +50,7 @@ namespace mongo {
  */
 class TextAndStage final : public PlanStage {
 public:
-    TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, const MatchExpression* filter);
+    TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup);
 
     void addChild(PlanStage* child);
 
@@ -77,8 +76,6 @@ private:
     // Not owned by us.
     WorkingSet* _ws;
 
-    // The filter is not owned by us.
-    const MatchExpression* _filter;
 
     // _dataMap is filled out by the first child and probed by subsequent children.  This is the
     // hash table that we create by intersecting _children and probe with the last child.
