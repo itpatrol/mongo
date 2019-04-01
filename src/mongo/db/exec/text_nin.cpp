@@ -103,7 +103,7 @@ PlanStage::StageState TextNINStage::doWork(WorkingSetID* out) {
             if(_currentChild == _children.size() - 1) {
               //check if we seen it in exclude list
               if (_seenMap.end() != _seenMap.find(member->recordId)) {
-                ++_specificStats.ninDropped;
+                ++_specificStats.docsRejected;
                 _ws->free(id);
                 return PlanStage::NEED_TIME;
               }

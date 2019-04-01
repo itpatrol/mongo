@@ -713,7 +713,7 @@ struct TextNINStats : public SpecificStats {
     TextNINStats() 
         : dupsTested(0),
           dupsDropped(0),
-          ninDropped(0),
+          docsRejected(0),
           _counter(0),
           recordIdsForgotten(0) {}
 
@@ -724,7 +724,7 @@ struct TextNINStats : public SpecificStats {
 
     size_t dupsTested;
     size_t dupsDropped;
-    size_t ninDropped;
+    size_t docsRejected;
 
 
     std::vector<size_t> _counter;

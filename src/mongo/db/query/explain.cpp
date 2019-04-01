@@ -550,7 +550,7 @@ void Explain::statsToBSON(const PlanStageStats& stats,
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
             bob->appendNumber("dupsTested", spec->dupsTested);
             bob->appendNumber("dupsDropped", spec->dupsDropped);
-            bob->appendNumber("excludeDropped", spec->ninDropped);
+            bob->appendNumber("docsRejected", spec->docsRejected);
             bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
 
             for (size_t i = 0; i < spec->_counter.size(); ++i) {
