@@ -122,7 +122,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
         auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
         std::vector<std::unique_ptr<PlanStage>> indexORScanList;
 
-        // We have positive phrasez, retrive them separately 
+        // We have positive phrases, retrive them separately 
         if(0 < positivePhrasesBounds.size()) {
           
             // Create stage TextAnd for each phrase 
@@ -147,6 +147,21 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 }
                 // Add TextAndStage to OR childrenList
                 indexORScanList.push_back(stdx::make_unique<TextAndStage>(opCtx, ws, true, std::move(indexAndScanList)));
+            }
+            // Add single terms that did not match into prases
+            for (const auto& term : _params.query.getTermsOutOfPhrasesForBounds()) {
+                IndexScanParams ixparams;
+
+                ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                    MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                    0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+                ixparams.bounds.isSimpleRange = true;
+                ixparams.descriptor = _params.index;
+                ixparams.direction = -1;
+
+                indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
             }
             textORSearcher->addChildren(std::move(indexORScanList));
         } else {

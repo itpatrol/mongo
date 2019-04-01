@@ -60,6 +60,7 @@ Status FTSQueryImpl::parse(TextIndexVersion textIndexVersion) {
 
     // Build a space delimited list of words to have the FtsTokenizer tokenize
     string positiveTermSentence;
+    string positiveSoloTermSentence;
     string negativeTermSentence;
 
     bool inNegation = false;
@@ -88,6 +89,10 @@ Status FTSQueryImpl::parse(TextIndexVersion textIndexVersion) {
                     negativeTermSentence.append(s);
                     negativeTermSentence.push_back(' ');
                 } else {
+                    if(!inPhrase) {
+                      positiveSoloTermSentence.append(s);
+                      positiveSoloTermSentence.push_back(' ');
+                    }
                     positiveTermSentence.append(s);
                     positiveTermSentence.push_back(' ');
                 }
@@ -142,6 +147,8 @@ Status FTSQueryImpl::parse(TextIndexVersion textIndexVersion) {
       _addPhraseTerms(tokenizer.get(), _positivePhrases[i], false);
     }
 
+    _addSoloTerms(tokenizer.get(), positiveSoloTermSentence, false);
+
     return Status::OK();
 }
 
@@ -157,6 +164,7 @@ std::unique_ptr<FTSQuery> FTSQueryImpl::clone() const {
     clonedQuery->_negatedPhrases = _negatedPhrases;
     clonedQuery->_termsForBounds = _termsForBounds;
     clonedQuery->_termsPhrasesForBounds = _termsPhrasesForBounds;
+    clonedQuery->_termsOutOfPhrasesForBounds = _termsOutOfPhrasesForBounds;
     return std::move(clonedQuery);
 }
 
@@ -204,6 +212,20 @@ void FTSQueryImpl::_addTerms(FTSTokenizer* tokenizer, const string& sentence, bo
 
         activeTerms.insert(word);
     }
+}
+
+void FTSQueryImpl::_addSoloTerms(FTSTokenizer* tokenizer, const string& sentence, bool negated) {
+    tokenizer->reset(sentence.c_str(), FTSTokenizer::kFilterStopWords);
+
+    while (tokenizer->moveNext()) {
+        string word = tokenizer->get().toString();
+
+        if (!negated) {
+            _termsOutOfPhrasesForBounds.insert(word);
+        }
+
+    }
+
 }
 
 void FTSQueryImpl::_addPhraseTerms(FTSTokenizer* tokenizer, const string& sentence, bool negated) {
