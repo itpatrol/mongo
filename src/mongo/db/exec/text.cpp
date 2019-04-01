@@ -41,6 +41,7 @@
 #include "mongo/db/exec/text_match.h"
 #include "mongo/db/exec/text_or.h"
 #include "mongo/db/exec/text_and.h"
+#include "mongo/db/exec/text_nin.h"
 #include "mongo/db/exec/working_set.h"
 #include "mongo/db/fts/fts_index_format.h"
 #include "mongo/db/jsobj.h"
@@ -180,6 +181,35 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
             }
             textORSearcher->addChildren(std::move(indexORScanList));
+        }
+
+        std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
+        if(0 < negativeTerms.size()) {
+          std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
+          for (const auto& term : _params.query.getNegatedTerms()) {
+            IndexScanParams ixparams;
+
+            ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+            ixparams.bounds.isSimpleRange = true;
+            ixparams.descriptor = _params.index;
+            ixparams.direction = -1;
+
+            indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+          }
+          auto textNINStage = make_unique<TextNINStage>(
+            opCtx, ws, textORSearcher.release(), std::move(indexNINScanList));
+
+          const MatchExpression* emptyFilter = nullptr;
+          auto fetchStage = make_unique<FetchStage>(
+              opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
+
+          textMatchStage = make_unique<TextMatchStage>(
+              opCtx, std::move(fetchStage), _params.query, _params.spec, ws);
+          return textMatchStage;
         }
         const MatchExpression* emptyFilter = nullptr;
         auto fetchStage = make_unique<FetchStage>(

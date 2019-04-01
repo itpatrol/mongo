@@ -708,4 +708,29 @@ struct TextAndStats : public SpecificStats {
     size_t recordIdsForgotten;
 };
 
+
+struct TextNINStats : public SpecificStats {
+    TextNINStats() 
+        : dupsTested(0),
+          dupsDropped(0),
+          ninDropped(0),
+          _counter(0),
+          recordIdsForgotten(0) {}
+
+    SpecificStats* clone() const final {
+        TextNINStats* specific = new TextNINStats(*this);
+        return specific;
+    }
+
+    size_t dupsTested;
+    size_t dupsDropped;
+    size_t ninDropped;
+
+
+    std::vector<size_t> _counter;
+
+    size_t recordIdsForgotten;
+
+};
+
 }  // namespace mongo

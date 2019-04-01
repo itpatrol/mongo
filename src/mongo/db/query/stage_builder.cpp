@@ -372,6 +372,7 @@ PlanStage* buildStages(OperationContext* opCtx,
         case STAGE_SUBPLAN:
         case STAGE_TEXT_OR:
         case STAGE_TEXT_AND:
+        case STAGE_TEXT_NIN:
         case STAGE_TEXT_MATCH:
         case STAGE_UNKNOWN:
         case STAGE_UPDATE: {

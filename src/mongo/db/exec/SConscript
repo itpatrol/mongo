@@ -79,6 +79,7 @@ env.Library(
         "text_match.cpp",
         "text_or.cpp",
         "text_and.cpp",
+        "text_nin.cpp",
         "update.cpp",
         "working_set_common.cpp",
         "write_stage_common.cpp",

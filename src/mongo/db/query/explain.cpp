@@ -544,6 +544,20 @@ void Explain::statsToBSON(const PlanStageStats& stats,
                                   spec->_counter[i]);
             }
         }
+    } else if (STAGE_TEXT_NIN == stats.stageType) {
+        TextNINStats* spec = static_cast<TextNINStats*>(stats.specific.get());
+
+        if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
+            bob->appendNumber("dupsTested", spec->dupsTested);
+            bob->appendNumber("dupsDropped", spec->dupsDropped);
+            bob->appendNumber("excludeDropped", spec->ninDropped);
+            bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
+
+            for (size_t i = 0; i < spec->_counter.size(); ++i) {
+                bob->appendNumber(string(stream() << "childCounter_" << i),
+                                  spec->_counter[i]);
+            }
+        }
     }
 
     // We're done if there are no children.
