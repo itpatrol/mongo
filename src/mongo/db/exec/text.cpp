@@ -250,7 +250,9 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
     } else {
         // Because we don't need the text score, we can use a non-blocking OR stage to get the union
         // of the index scans.
-        auto textSearcher = make_unique<TextAndStage>(opCtx, ws, true, std::move(indexScanList));
+        auto textSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
+
+        textSearcher->addChildren(std::move(indexScanList));
 
         // Unlike the TEXT_OR stage, the OR stage does not fetch the documents that it outputs. We
         // add our own FETCH stage to satisfy the requirement of the TEXT_MATCH stage that its
