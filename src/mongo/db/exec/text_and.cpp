@@ -44,12 +44,19 @@ using stdx::make_unique;
 // static
 const char* TextAndStage::kStageType = "TEXT_AND";
 
-TextAndStage::TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup)
+TextAndStage::TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, Children childrenToAdd)
     : PlanStage(kStageType, opCtx),
       _ws(ws),
       _intersectingChildren(true),
       _currentChild(0),
-      _dedup(dedup){}
+      _dedup(dedup){
+        for (size_t i = 0; i < childrenToAdd.size(); ++i) {
+          _specificStats._counter.push_back(0);
+        }
+        _children.insert(_children.end(),
+                        std::make_move_iterator(childrenToAdd.begin()),
+                        std::make_move_iterator(childrenToAdd.end()));
+      }
 
 void TextAndStage::addChild(PlanStage* child) {
     _children.emplace_back(child);

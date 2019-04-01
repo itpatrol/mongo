@@ -138,6 +138,10 @@ Status FTSQueryImpl::parse(TextIndexVersion textIndexVersion) {
     _addTerms(tokenizer.get(), positiveTermSentence, false);
     _addTerms(tokenizer.get(), negativeTermSentence, true);
 
+    for (size_t i = 0; i < _positivePhrases.size(); i++) {
+      _addPhraseTerms(tokenizer.get(), _positivePhrases[i], false);
+    }
+
     return Status::OK();
 }
 
@@ -152,6 +156,7 @@ std::unique_ptr<FTSQuery> FTSQueryImpl::clone() const {
     clonedQuery->_positivePhrases = _positivePhrases;
     clonedQuery->_negatedPhrases = _negatedPhrases;
     clonedQuery->_termsForBounds = _termsForBounds;
+    clonedQuery->_termsPhrasesForBounds = _termsPhrasesForBounds;
     return std::move(clonedQuery);
 }
 
@@ -201,12 +206,56 @@ void FTSQueryImpl::_addTerms(FTSTokenizer* tokenizer, const string& sentence, bo
     }
 }
 
+void FTSQueryImpl::_addPhraseTerms(FTSTokenizer* tokenizer, const string& sentence, bool negated) {
+    tokenizer->reset(sentence.c_str(), FTSTokenizer::kFilterStopWords);
+
+    auto ActiveTerms = std::set<std::string>();
+    
+    // First, get all the terms for indexing, ie, lower cased words
+    // If we are case-insensitive, we can also used this for positive, and negative terms
+    // Some terms may be expanded into multiple words in some non-English languages
+    while (tokenizer->moveNext()) {
+        string word = tokenizer->get().toString();
+
+        // Compute the string corresponding to 'token' that will be used for the matcher.
+        // For case and diacritic insensitive queries, this is the same string as 'boundsTerm'
+        // computed above.
+        if (!getCaseSensitive() && !getDiacriticSensitive()) {
+            ActiveTerms.insert(word);
+        }
+    }
+
+    if (!getCaseSensitive() && !getDiacriticSensitive()) {
+        _termsPhrasesForBounds.push_back(ActiveTerms);
+        return;
+    }
+
+    FTSTokenizer::Options newOptions = FTSTokenizer::kFilterStopWords;
+
+    if (getCaseSensitive()) {
+        newOptions |= FTSTokenizer::kGenerateCaseSensitiveTokens;
+    }
+    if (getDiacriticSensitive()) {
+        newOptions |= FTSTokenizer::kGenerateDiacriticSensitiveTokens;
+    }
+
+    tokenizer->reset(sentence.c_str(), newOptions);
+
+    // If we want case-sensitivity or diacritic sensitivity, get the correct token.
+    while (tokenizer->moveNext()) {
+        string word = tokenizer->get().toString();
+        ActiveTerms.insert(word);
+    }
+    _termsPhrasesForBounds.push_back(ActiveTerms);
+}
+
 BSONObj FTSQueryImpl::toBSON() const {
     BSONObjBuilder bob;
     bob.append("terms", getPositiveTerms());
     bob.append("negatedTerms", getNegatedTerms());
     bob.append("phrases", getPositivePhr());
     bob.append("negatedPhrases", getNegatedPhr());
+    bob.append("termsPhrasesForBounds", getTermsPhrasesForBounds());
     return bob.obj();
 }
 }

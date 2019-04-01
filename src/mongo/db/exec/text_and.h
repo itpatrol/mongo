@@ -50,7 +50,7 @@ namespace mongo {
  */
 class TextAndStage final : public PlanStage {
 public:
-    TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup);
+    TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, Children childrenToAdd);
 
     void addChild(PlanStage* child);
 

@@ -66,6 +66,9 @@ public:
     const std::set<std::string>& getTermsForBounds() const {
         return _termsForBounds;
     }
+    const std::vector<std::set<std::string>>& getTermsPhrasesForBounds() const {
+        return _termsPhrasesForBounds;
+    }
 
     /**
      * Returns a BSON object with the following format:
@@ -80,12 +83,14 @@ public:
 
 private:
     void _addTerms(FTSTokenizer* tokenizer, const std::string& tokens, bool negated);
+    void _addPhraseTerms(FTSTokenizer* tokenizer, const std::string& tokens, bool negated);
 
     std::set<std::string> _positiveTerms;
     std::set<std::string> _negatedTerms;
     std::vector<std::string> _positivePhrases;
     std::vector<std::string> _negatedPhrases;
     std::set<std::string> _termsForBounds;
+    std::vector<std::set<std::string>> _termsPhrasesForBounds;
 };
 }
 }
