@@ -515,6 +515,7 @@ void Explain::statsToBSON(const PlanStageStats& stats,
 
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
             bob->appendNumber("docsRejected", spec->docsRejected);
+            bob->appendNumber("isNegativeExcluded", spec->isNegativeExcluded);
         }
     } else if (STAGE_TEXT_OR == stats.stageType) {
         TextOrStats* spec = static_cast<TextOrStats*>(stats.specific.get());

@@ -57,6 +57,8 @@ public:
      */
     bool matches(const BSONObj& obj) const;
 
+    bool matches(const BSONObj& obj, bool isNegativeExcluded) const;
+
     /**
      * Returns whether 'obj' contains at least one positive term.
      */

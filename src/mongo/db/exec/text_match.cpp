@@ -52,7 +52,24 @@ TextMatchStage::TextMatchStage(OperationContext* opCtx,
                                const FTSQueryImpl& query,
                                const FTSSpec& spec,
                                WorkingSet* ws)
-    : PlanStage(kStageType, opCtx), _ftsMatcher(query, spec), _ws(ws) {
+    : PlanStage(kStageType, opCtx), 
+      _ftsMatcher(query, spec),
+      _isNegativeExcluded(false),
+      _ws(ws) {
+    _children.emplace_back(std::move(child));
+}
+
+TextMatchStage::TextMatchStage(OperationContext* opCtx,
+                               unique_ptr<PlanStage> child,
+                               const FTSQueryImpl& query,
+                               const FTSSpec& spec,
+                               bool isNegativeExcluded,
+                               WorkingSet* ws)
+    : PlanStage(kStageType, opCtx), 
+      _ftsMatcher(query, spec), 
+      _isNegativeExcluded(isNegativeExcluded), 
+      _ws(ws) {
+      _specificStats.isNegativeExcluded = _isNegativeExcluded;
     _children.emplace_back(std::move(child));
 }
 
@@ -89,7 +106,7 @@ PlanStage::StageState TextMatchStage::doWork(WorkingSetID* out) {
         WorkingSetMember* wsm = _ws->get(*out);
 
         // Filter for phrases and negated terms.
-        if (!_ftsMatcher.matches(wsm->obj.value())) {
+        if (!_ftsMatcher.matches(wsm->obj.value(), _isNegativeExcluded)) {
             _ws->free(*out);
             *out = WorkingSet::INVALID_ID;
             ++_specificStats.docsRejected;

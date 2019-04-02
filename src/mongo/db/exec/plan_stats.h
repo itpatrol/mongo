@@ -665,7 +665,7 @@ struct TextStats : public SpecificStats {
 };
 
 struct TextMatchStats : public SpecificStats {
-    TextMatchStats() : docsRejected(0) {}
+    TextMatchStats() : docsRejected(0), isNegativeExcluded(false) {}
 
     SpecificStats* clone() const final {
         TextMatchStats* specific = new TextMatchStats(*this);
@@ -673,6 +673,7 @@ struct TextMatchStats : public SpecificStats {
     }
 
     size_t docsRejected;
+    bool isNegativeExcluded;
 };
 
 struct TextOrStats : public SpecificStats {

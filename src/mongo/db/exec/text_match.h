@@ -64,6 +64,12 @@ public:
                    const FTSQueryImpl& query,
                    const FTSSpec& spec,
                    WorkingSet* ws);
+    TextMatchStage(OperationContext* opCtx,
+                   unique_ptr<PlanStage> child,
+                   const FTSQueryImpl& query,
+                   const FTSSpec& spec,
+                   bool isNegativeExcluded,
+                   WorkingSet* ws);
     ~TextMatchStage();
 
     void addChild(PlanStage* child);
@@ -88,6 +94,9 @@ private:
 
     // Not owned by us.
     WorkingSet* _ws;
+
+    //Do we want text score?
+    bool _isNegativeExcluded;
 
     TextMatchStats _specificStats;
 };

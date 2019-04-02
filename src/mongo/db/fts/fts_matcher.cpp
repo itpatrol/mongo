@@ -68,6 +68,40 @@ bool FTSMatcher::matches(const BSONObj& obj) const {
     return negativePhrasesMatch(obj);
 }
 
+bool FTSMatcher::matches(const BSONObj& obj, bool isNegativeExcluded) const {
+    if(isNegativeExcluded) {
+      if (!canSkipPositiveTermCheck()) { 
+        if (!hasPositiveTerm(obj)) {
+            return false;
+        } 
+      }
+      if (!positivePhrasesMatch(obj)) {
+        return false;
+      }
+
+      return negativePhrasesMatch(obj);
+    }
+    if (canSkipPositiveTermCheck()) {
+        // We can assume that 'obj' has at least one positive term, and dassert as a sanity
+        // check.
+        dassert(hasPositiveTerm(obj));
+    } else {
+        if (!hasPositiveTerm(obj)) {
+            return false;
+        }
+    }
+
+    if (hasNegativeTerm(obj)) {
+        return false;
+    }
+
+    if (!positivePhrasesMatch(obj)) {
+        return false;
+    }
+
+    return negativePhrasesMatch(obj);
+}
+
 bool FTSMatcher::hasPositiveTerm(const BSONObj& obj) const {
     FTSElementIterator it(_spec, obj);
 
