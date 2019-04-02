@@ -74,7 +74,7 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
             isBacketFound = findBucket(currentValue);
             if(!isBacketFound) {
               Bucket currentBucket(
-                  pExpCtx, currentValue, _accumulatorFactories);
+                  pExpCtx, currentValue, _accumulatedFields);
               addDocumentToBucket(currentPair, currentBucket);
               addBucket(currentBucket);
             } else {
@@ -101,14 +101,13 @@ DocumentSource::GetNextResult DocumentSourceCluster::getNext() {
     return makeDocument(*(_bucketsIterator++));
 }
 
-// TODO: Add logic here
 DocumentSource::GetDepsReturn DocumentSourceCluster::getDependencies(DepsTracker* deps) const {
     // Add the 'groupBy' expression.
-    _groupExpression->addDependencies(deps);
+    _groupByExpression->addDependencies(deps);
 
     // Add the 'output' fields.
-    for (auto&& exp : _expressions) {
-        exp->addDependencies(deps);
+    for (auto&& accumulatedField : _accumulatedFields) {
+        accumulatedField.expression->addDependencies(deps);
     }
 
     // We know exactly which fields will be present in the output document. Future stages cannot
@@ -118,15 +117,15 @@ DocumentSource::GetDepsReturn DocumentSourceCluster::getDependencies(DepsTracker
 }
 
 Value DocumentSourceCluster::extractKey(const Document& doc) {
-    if (!_groupExpression) {
+    if (!_groupByExpression) {
         return Value(BSONNULL);
     }
 
-    _variables->setRoot(doc);
-    Value key = _groupExpression->evaluate(_variables.get());
+    Value key = _groupByExpression->evaluate(doc);
+    
     LOG(3) << "key :" << key ;
     // TODO check if extracted value match delta
-    uassert(40509,
+    uassert(40709,
                 str::stream() << "$cluster  'groupBy' value type must match"
                               << " with delta type "
                               << typeName(_delta.getType())
@@ -136,7 +135,7 @@ Value DocumentSourceCluster::extractKey(const Document& doc) {
     if(_delta.getType() == Array) {
         std::vector<Value> arrayDelta = _delta.getArray();
         std::vector<Value> arrayKey = key.getArray();
-        uassert(40510,
+        uassert(40710,
                 str::stream() << "$cluster  'groupBy' value size type must match"
                               << " with delta size "
                               << arrayDelta.size()
@@ -219,7 +218,7 @@ Value DocumentSourceCluster::abs(const Value& numericArg) {
         return Value(numericArg.getDecimal().toAbs());
     } else {
         long long num = numericArg.getLong();
-        uassert(40508,
+        uassert(40708,
                 "can't take $abs of long long min",
                 num != std::numeric_limits<long long>::min());
         long long absVal = std::abs(num);
@@ -249,18 +248,16 @@ Value DocumentSourceCluster::subtract(const Value& lhs, const Value& rhs) {
         return Value(BSONNULL);
     } else if (lhs.getType() == Date) {
         if (rhs.getType() == Date) {
-            long long timeDelta = lhs.getDate() - rhs.getDate();
-            return Value(timeDelta);
+            return Value(durationCount<Milliseconds>(lhs.getDate() - rhs.getDate()));
         } else if (rhs.numeric()) {
-            long long millisSinceEpoch = lhs.getDate() - rhs.coerceToLong();
-            return Value(Date_t::fromMillisSinceEpoch(millisSinceEpoch));
+            return Value(lhs.getDate() - Milliseconds(rhs.coerceToLong()));
         } else {
-            uasserted(40506,
+            uasserted(40706,
                       str::stream() << "cant $subtract a " << typeName(rhs.getType())
                                     << " from a Date");
         }
     } else {
-        uasserted(40507,
+        uasserted(40707,
                   str::stream() << "cant $subtract a" << typeName(rhs.getType()) << " from a "
                                 << typeName(lhs.getType()));
     }
@@ -268,20 +265,19 @@ Value DocumentSourceCluster::subtract(const Value& lhs, const Value& rhs) {
 
 void DocumentSourceCluster::addDocumentToBucket(const pair<Value, Document>& entry,
                                                 Bucket& bucket) {
-    const size_t numAccumulators = _accumulatorFactories.size();
-    _variables->setRoot(entry.second);
+    const size_t numAccumulators = _accumulatedFields.size();
     for (size_t k = 0; k < numAccumulators; k++) {
-        bucket._accums[k]->process(_expressions[k]->evaluate(_variables.get()), false);
+        bucket._accums[k]->process(_accumulatedFields[k].expression->evaluate(entry.second), false);
     }
 }
 
 DocumentSourceCluster::Bucket::Bucket(const boost::intrusive_ptr<ExpressionContext>& expCtx,
                                       Value groupBy,
-                                      vector<Accumulator::Factory> accumulatorFactories)
+                                      const vector<AccumulationStatement>& accumulationStatements)
     : _groupBy(groupBy) {
-    _accums.reserve(accumulatorFactories.size());
-    for (auto&& factory : accumulatorFactories) {
-        _accums.push_back(factory(expCtx));
+    _accums.reserve(accumulationStatements.size());
+    for (auto&& accumulationStatement : accumulationStatements) {
+        _accums.push_back(accumulationStatement.makeAccumulator(expCtx));
     }
 }
 
@@ -290,7 +286,7 @@ void DocumentSourceCluster::addBucket(Bucket& newBucket) {
 }
 
 Document DocumentSourceCluster::makeDocument(const Bucket& bucket) {
-    const size_t nAccumulatedFields = _fieldNames.size();
+    const size_t nAccumulatedFields = _accumulatedFields.size();
     MutableDocument out(1 + nAccumulatedFields);
 
     out.addField("_id", bucket._groupBy);
@@ -301,29 +297,30 @@ Document DocumentSourceCluster::makeDocument(const Bucket& bucket) {
 
         // To be consistent with the $group stage, we consider "missing" to be equivalent to null
         // when evaluating accumulators.
-        out.addField(_fieldNames[i], val.missing() ? Value(BSONNULL) : std::move(val));
+        out.addField(_accumulatedFields[i].fieldName, val.missing() ? Value(BSONNULL) : std::move(val));
     }
     return out.freeze();
 }
 
-void DocumentSourceCluster::dispose() {
+void DocumentSourceCluster::doDispose() {
     _sortedInput.reset();
     _bucketsIterator = _buckets.end();
-    pSource->dispose();
 }
 
-Value DocumentSourceCluster::serialize(bool explain) const {
+Value DocumentSourceCluster::serialize(
+    boost::optional<ExplainOptions::Verbosity> explain) const {
     MutableDocument insides;
 
-    insides["groupBy"] = _groupExpression->serialize(explain);
+    insides["groupBy"] = _groupByExpression->serialize(static_cast<bool>(explain));
     insides["delta"] = Value(_delta);
 
-    const size_t nOutputFields = _fieldNames.size();
-    MutableDocument outputSpec(nOutputFields);
-    for (size_t i = 0; i < nOutputFields; i++) {
-        intrusive_ptr<Accumulator> accum = _accumulatorFactories[i](pExpCtx);
-        outputSpec[_fieldNames[i]] =
-            Value{Document{{accum->getOpName(), _expressions[i]->serialize(explain)}}};
+
+    MutableDocument outputSpec(_accumulatedFields.size());
+    for (auto&& accumulatedField : _accumulatedFields) {
+        intrusive_ptr<Accumulator> accum = accumulatedField.makeAccumulator(pExpCtx);
+        outputSpec[accumulatedField.fieldName] =
+            Value{Document{{accum->getOpName(),
+                            accumulatedField.expression->serialize(static_cast<bool>(explain))}}};
     }
     insides["output"] = outputSpec.freezeToValue();
 
@@ -334,19 +331,17 @@ Value DocumentSourceCluster::serialize(bool explain) const {
 intrusive_ptr<DocumentSourceCluster> DocumentSourceCluster::create(
     const intrusive_ptr<ExpressionContext>& pExpCtx,
     const boost::intrusive_ptr<Expression>& groupExpression,
-    Variables::Id numVariables,
     Value Delta,
     std::vector<AccumulationStatement> accumulationStatements,
     uint64_t maxMemoryUsageBytes) {
     // If there is no output field specified, then add the default one.
     if (accumulationStatements.empty()) {
         accumulationStatements.emplace_back("count",
-                                            AccumulationStatement::getFactory("$sum"),
-                                            ExpressionConstant::create(pExpCtx, Value(1)));
+                                            ExpressionConstant::create(pExpCtx, Value(1)),
+                                            AccumulationStatement::getFactory("$sum"));
     }
     return new DocumentSourceCluster(pExpCtx,
                                         groupExpression,
-                                        numVariables,
                                         Delta,
                                         accumulationStatements,
                                         maxMemoryUsageBytes);
@@ -355,21 +350,17 @@ intrusive_ptr<DocumentSourceCluster> DocumentSourceCluster::create(
 DocumentSourceCluster::DocumentSourceCluster(
     const intrusive_ptr<ExpressionContext>& pExpCtx,
     const boost::intrusive_ptr<Expression>& groupExpression,
-    Variables::Id numVariables,
     Value Delta,
     std::vector<AccumulationStatement> accumulationStatements,
     uint64_t maxMemoryUsageBytes)
     : DocumentSource(pExpCtx),
       _delta(Delta),
       _maxMemoryUsageBytes(maxMemoryUsageBytes),
-      _variables(stdx::make_unique<Variables>(numVariables)),
-      _groupExpression(groupExpression) {
+      _groupByExpression(groupExpression) {
 
     invariant(!accumulationStatements.empty());
     for (auto&& accumulationStatement : accumulationStatements) {
-        _fieldNames.push_back(std::move(accumulationStatement.fieldName));
-        _accumulatorFactories.push_back(accumulationStatement.factory);
-        _expressions.push_back(accumulationStatement.expression);
+        _accumulatedFields.push_back(accumulationStatement);
     }
 }
 
@@ -387,7 +378,7 @@ boost::intrusive_ptr<Expression> parseGroupByExpression(
         return ExpressionFieldPath::parse(expCtx, groupByField.str(), vps);
     } else {
         uasserted(
-            40505,
+            40705,
             str::stream() << "The $cluster 'groupBy' field must be defined as a $-prefixed "
                              "path or an expression object, but found: "
                           << groupByField.toString(false, false));
@@ -397,14 +388,13 @@ boost::intrusive_ptr<Expression> parseGroupByExpression(
 
 intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
     BSONElement elem, const intrusive_ptr<ExpressionContext>& pExpCtx) {
-    uassert(40500,
+    uassert(40700,
             str::stream() << "Argument to $cluster stage must be an object, but found type: "
                           << typeName(elem.type())
                           << ".",
             elem.type() == BSONType::Object);
 
-    VariablesIdGenerator idGenerator;
-    VariablesParseState vps(&idGenerator);
+    VariablesParseState vps = pExpCtx->variablesParseState;
     vector<AccumulationStatement> accumulationStatements;
     boost::intrusive_ptr<Expression> groupExpression;
     Value Delta;
@@ -418,7 +408,7 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
           Delta = Value(argument);
           if(!Delta.numeric()){
               uassert(
-                  40501,
+                  40701,
                   str::stream() << "The $cluster 'delta' field must be a numeric or array of numeric, but found type: "
                                 << typeName(Delta.getType())
                                 << ".",
@@ -428,7 +418,7 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
               size_t endIndex = arrayDelta.size();
               for (size_t i = startIndex; i < endIndex; i++) {
                   uassert(
-                      40511,
+                      40711,
                       str::stream() << "The $cluster 'delta' array item must be a numeric,"               << "but found type: "
                                     << typeName(arrayDelta[i].getType())
                                     << ".",
@@ -438,7 +428,7 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
           isDelta = true;
         } else if ("output" == argName) {
             uassert(
-                40502,
+                40702,
                 str::stream() << "The $cluster 'output' field must be an object, but found type: "
                               << typeName(argument.type())
                               << ".",
@@ -449,17 +439,16 @@ intrusive_ptr<DocumentSource> DocumentSourceCluster::createFromBson(
                     AccumulationStatement::parseAccumulationStatement(pExpCtx, outputField, vps));
             }
         } else {
-            uasserted(40503, str::stream() << "Unrecognized option to $cluster: " << argName << ".");
+            uasserted(40703, str::stream() << "Unrecognized option to $cluster: " << argName << ".");
         }
     }
     
-    uassert(40504,
+    uassert(40704,
             "$cluster requires 'groupBy' and 'delta' to be specified",
             groupExpression && isDelta );
 
     return DocumentSourceCluster::create(pExpCtx,
                                             groupExpression,
-                                            idGenerator.getIdCount(),
                                             Delta,
                                             accumulationStatements);
 }
