@@ -208,7 +208,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
               opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
 
           textMatchStage = make_unique<TextMatchStage>(
-              opCtx, std::move(fetchStage), _params.query, _params.spec, true, ws);
+              opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
           return textMatchStage;
         }
         const MatchExpression* emptyFilter = nullptr;
@@ -216,7 +216,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
             opCtx, ws, textORSearcher.release(), emptyFilter, _params.index->getCollection());
 
         textMatchStage = make_unique<TextMatchStage>(
-            opCtx, std::move(fetchStage), _params.query, _params.spec, true, ws);
+            opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
         return textMatchStage;
     }
 
