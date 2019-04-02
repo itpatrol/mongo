@@ -63,8 +63,8 @@ TextMatchStage::TextMatchStage(OperationContext* opCtx,
                                unique_ptr<PlanStage> child,
                                const FTSQueryImpl& query,
                                const FTSSpec& spec,
-                               bool isNegativeExcluded,
-                               WorkingSet* ws)
+                               WorkingSet* ws,
+                               bool isNegativeExcluded)
     : PlanStage(kStageType, opCtx), 
       _ftsMatcher(query, spec), 
       _isNegativeExcluded(isNegativeExcluded), 
