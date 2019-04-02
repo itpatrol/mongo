@@ -68,8 +68,8 @@ public:
                    unique_ptr<PlanStage> child,
                    const FTSQueryImpl& query,
                    const FTSSpec& spec,
-                   bool isNegativeExcluded,
-                   WorkingSet* ws);
+                   WorkingSet* ws,
+                   bool isNegativeExcluded);
     ~TextMatchStage();
 
     void addChild(PlanStage* child);
