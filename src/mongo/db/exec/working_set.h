@@ -307,6 +307,7 @@ public:
     bool hasComputed(const WorkingSetComputedDataType type) const;
     const WorkingSetComputedData* getComputed(const WorkingSetComputedDataType type) const;
     void addComputed(WorkingSetComputedData* data);
+    void updateComputed(WorkingSetComputedData* data);
 
     //
     // Fetching

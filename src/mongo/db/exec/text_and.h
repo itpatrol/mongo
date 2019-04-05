@@ -35,11 +35,14 @@
 
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/jsobj.h"
+#include "mongo/db/fts/fts_spec.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/unordered_map.h"
 #include "mongo/platform/unordered_set.h"
 
 namespace mongo {
+
+  using fts::FTSSpec;
 
 /**
  * This stage outputs the union of its children.  It optionally deduplicates on RecordId.
@@ -50,7 +53,16 @@ namespace mongo {
  */
 class TextAndStage final : public PlanStage {
 public:
-    TextAndStage(OperationContext* opCtx, WorkingSet* ws, bool dedup, Children childrenToAdd);
+    TextAndStage(OperationContext* opCtx,
+                 WorkingSet* ws,
+                 const FTSSpec& ftsSpec,
+                 bool dedup,
+                 Children childrenToAdd);
+    TextAndStage(OperationContext* opCtx,
+                 WorkingSet* ws,
+                 const FTSSpec& ftsSpec,
+                 bool dedup);
+    ~TextAndStage();
 
     void addChild(PlanStage* child);
 
@@ -73,13 +85,21 @@ public:
     static const char* kStageType;
 
 private:
+    // The index spec used to determine where to find the score.
+    FTSSpec _ftsSpec;
     // Not owned by us.
     WorkingSet* _ws;
 
 
+    struct TextRecordData {
+        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0) {}
+        WorkingSetID wsid;
+        double score;
+    };
+
     // _dataMap is filled out by the first child and probed by subsequent children.  This is the
     // hash table that we create by intersecting _children and probe with the last child.
-    typedef unordered_map<RecordId, WorkingSetID, RecordId::Hasher> DataMap;
+    typedef unordered_map<RecordId, TextRecordData, RecordId::Hasher> DataMap;
     DataMap _dataMap;
 
     // Keeps track of what elements from _dataMap subsequent children have seen.

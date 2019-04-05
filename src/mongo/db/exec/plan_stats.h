@@ -677,14 +677,21 @@ struct TextMatchStats : public SpecificStats {
 };
 
 struct TextOrStats : public SpecificStats {
-    TextOrStats() : fetches(0) {}
+    TextOrStats() 
+        : dupsTested(0),
+          dupsDropped(0),
+          recordIdsForgotten(0){}
 
     SpecificStats* clone() const final {
         TextOrStats* specific = new TextOrStats(*this);
         return specific;
     }
 
-    size_t fetches;
+    size_t dupsTested;
+    size_t dupsDropped;
+
+    size_t recordIdsForgotten;
+
 };
 
 

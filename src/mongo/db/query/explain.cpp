@@ -162,9 +162,6 @@ size_t getDocsExamined(StageType type, const SpecificStats* specific) {
     } else if (STAGE_IDHACK == type) {
         const IDHackStats* spec = static_cast<const IDHackStats*>(specific);
         return spec->docsExamined;
-    } else if (STAGE_TEXT_OR == type) {
-        const TextOrStats* spec = static_cast<const TextOrStats*>(specific);
-        return spec->fetches;
     }
 
     return 0;
@@ -521,7 +518,9 @@ void Explain::statsToBSON(const PlanStageStats& stats,
         TextOrStats* spec = static_cast<TextOrStats*>(stats.specific.get());
 
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
-            bob->appendNumber("docsExamined", spec->fetches);
+            bob->appendNumber("dupsTested", spec->dupsTested);
+            bob->appendNumber("dupsDropped", spec->dupsDropped);
+            bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
         }
     } else if (STAGE_UPDATE == stats.stageType) {
         UpdateStats* spec = static_cast<UpdateStats*>(stats.specific.get());
