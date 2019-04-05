@@ -678,17 +678,20 @@ struct TextMatchStats : public SpecificStats {
 
 struct TextOrStats : public SpecificStats {
     TextOrStats() 
-        : dupsTested(0),
+        : wantTextScore(0),
+          dupsTested(0),
           dupsDropped(0),
+          singleChild(0),
           recordIdsForgotten(0){}
 
     SpecificStats* clone() const final {
         TextOrStats* specific = new TextOrStats(*this);
         return specific;
     }
-
+    bool wantTextScore;
     size_t dupsTested;
     size_t dupsDropped;
+    bool singleChild;
 
     size_t recordIdsForgotten;
 
@@ -697,7 +700,8 @@ struct TextOrStats : public SpecificStats {
 
 struct TextAndStats : public SpecificStats {
     TextAndStats() 
-        : dupsTested(0),
+        : wantTextScore(0),
+          dupsTested(0),
           dupsDropped(0),
           _counter(0),
           recordIdsForgotten(0) {}
@@ -706,7 +710,7 @@ struct TextAndStats : public SpecificStats {
         TextAndStats* specific = new TextAndStats(*this);
         return specific;
     }
-
+    bool wantTextScore;
     size_t dupsTested;
     size_t dupsDropped;
 

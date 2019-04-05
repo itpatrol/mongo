@@ -69,7 +69,7 @@ public:
     TextOrStage(OperationContext* opCtx,
                  WorkingSet* ws,
                  const FTSSpec& ftsSpec,
-                 bool dedup);
+                 bool wantTextScore);
 
     void addChild(PlanStage* child);
 
@@ -92,6 +92,11 @@ public:
     static const char* kStageType;
 
 private:
+     /**
+     * Worker for Single CHild. Reads from the children, searching for the terms in the query and
+     * populates the score map.
+     */
+    StageState readFromChild(WorkingSetID* out);
     /**
      * Worker for kReadingTerms. Reads from the children, searching for the terms in the query and
      * populates the score map.
@@ -140,7 +145,7 @@ private:
     size_t _currentChild = 0;
 
     // True if we dedup on RecordId, false otherwise.
-    bool _dedup;
+    bool _wantTextScore;
 
     // Stats
     TextOrStats _specificStats;

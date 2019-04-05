@@ -518,8 +518,10 @@ void Explain::statsToBSON(const PlanStageStats& stats,
         TextOrStats* spec = static_cast<TextOrStats*>(stats.specific.get());
 
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
+            bob->appendNumber("wantTextScore", spec->wantTextScore);
             bob->appendNumber("dupsTested", spec->dupsTested);
             bob->appendNumber("dupsDropped", spec->dupsDropped);
+            bob->appendNumber("singleChildOptimization", spec->singleChild);
             bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
         }
     } else if (STAGE_UPDATE == stats.stageType) {
@@ -536,6 +538,7 @@ void Explain::statsToBSON(const PlanStageStats& stats,
         TextAndStats* spec = static_cast<TextAndStats*>(stats.specific.get());
 
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
+            bob->appendNumber("wantTextScore", spec->wantTextScore);
             bob->appendNumber("dupsTested", spec->dupsTested);
             bob->appendNumber("dupsDropped", spec->dupsDropped);
             bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);

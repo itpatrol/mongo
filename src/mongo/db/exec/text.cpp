@@ -120,7 +120,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
     
     //First we need to retrive positive phrase indexes
     std::vector<std::set<std::string>> positivePhrasesBounds = _params.query.getTermsPhrasesForBounds();
-    auto textORSearcher = make_unique<TextOrStage>(opCtx, ws, _params.spec, true);
+    auto textORSearcher = make_unique<TextOrStage>(opCtx, ws, _params.spec, wantTextScore);
     //auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
     //auto textORSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, true);
     std::vector<std::unique_ptr<PlanStage>> indexORScanList;
@@ -149,7 +149,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 indexAndScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
             }
             // Add TextAndStage to OR childrenList
-            indexORScanList.push_back(stdx::make_unique<TextAndStage>(opCtx, ws,  _params.spec, true, std::move(indexAndScanList)));
+            indexORScanList.push_back(stdx::make_unique<TextAndStage>(opCtx, ws,  _params.spec, wantTextScore, std::move(indexAndScanList)));
         }
         // Add single terms that did not match into prases
         for (const auto& term : _params.query.getTermsOutOfPhrasesForBounds()) {

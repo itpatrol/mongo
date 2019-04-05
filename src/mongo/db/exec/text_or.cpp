@@ -28,7 +28,7 @@
  *    it in the license file.
  */
 
-#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+//#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
 
 #include "mongo/db/exec/text_or.h"
 
@@ -37,7 +37,7 @@
 #include "mongo/db/exec/working_set_computed_data.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/mongoutils/str.h"
-#include "mongo/util/log.h"
+//#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -51,12 +51,13 @@ const char* TextOrStage::kStageType = "TEXT_OR";
 TextOrStage::TextOrStage(OperationContext* opCtx,
                            WorkingSet* ws,
                            const FTSSpec& ftsSpec,
-                           bool dedup)
+                           bool wantTextScore)
     : PlanStage(kStageType, opCtx),
       _ws(ws),
       _ftsSpec(ftsSpec),
       _currentChild(0),
-      _dedup(dedup){
+      _wantTextScore(wantTextScore){
+        _specificStats.wantTextScore = _wantTextScore;
       }
 
 void TextOrStage::addChild(PlanStage* child) {
@@ -79,6 +80,11 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
     }
 
     PlanStage::StageState stageState = PlanStage::IS_EOF;
+    // Optimization for one child to process
+    if(1 == _children.size()) {
+      _specificStats.singleChild = true;
+      return readFromChild(out);
+    }
 
     switch (_internalState) {
         case State::kReadingTerms:
@@ -103,10 +109,10 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
     return score->getScore();
   }
   const IndexKeyDatum newKeyData = member->keyData.back();
-  for (size_t i = 0; i < member->keyData.size(); ++i) {
+  /*for (size_t i = 0; i < member->keyData.size(); ++i) {
       //LOG(3) << "indexKeyPattern [" << i << "]" << member->keyData[i].indexKeyPattern;
       //LOG(3) << "key data [" << i << "]" << member->keyData[i].keyData;
-  }
+  }*/
   
   BSONObjIterator keyIt(newKeyData.keyData);
   for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
@@ -132,25 +138,20 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
 
     if (PlanStage::ADVANCED == childStatus) {
         WorkingSetMember* member = _ws->get(id);
-
-        // If we're deduping (and there's something to dedup by)
-        if (_dedup && member->hasRecordId()) {
-            //LOG(3) << "OR: " << id << " id" << member->recordId;
-            // On second and other child - check for _dataMap
-            ++_specificStats.dupsTested;
-
-            double documentTermScore = getIndexScore(member);
-            DataMap::iterator it = _dataMap.find(member->recordId);
-            // Found. Store extra.
-            if (_dataMap.end() != it) {
-                it->second.score += documentTermScore;
-                ++_specificStats.dupsDropped;
-                _ws->free(id);
-                return PlanStage::NEED_TIME;
-            }
-
+        // Maybe the child had an invalidation.  We intersect RecordId(s) so we can't do anything
+        // with this WSM.
+        if (!member->hasRecordId()) {
+            _ws->flagForReview(id);
+            return PlanStage::NEED_TIME;
+        }
+        ++_specificStats.dupsTested;
+        if(!_wantTextScore) {
+          if (_dataMap.end() != _dataMap.find(member->recordId)) {
+            ++_specificStats.dupsDropped;
+            _ws->free(id);
+            return PlanStage::NEED_TIME;
+          } else {
             TextRecordData textRecordData;
-            textRecordData.score = documentTermScore;
             textRecordData.wsid = id;
             if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
               // Didn't insert because we already had this RecordId inside the map. This should only
@@ -159,9 +160,32 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
               _ws->free(id);
               return PlanStage::NEED_TIME;
             }
-            //member->makeObjOwnedIfNeeded();
+            *out = id;
+            return PlanStage::ADVANCED;
+          }
+        }
+        double documentTermScore = getIndexScore(member);
+        DataMap::iterator it = _dataMap.find(member->recordId);
+        // Found. Store extra.
+        if (_dataMap.end() != it) {
+            it->second.score += documentTermScore;
+            ++_specificStats.dupsDropped;
+            _ws->free(id);
             return PlanStage::NEED_TIME;
         }
+
+        TextRecordData textRecordData;
+        textRecordData.score = documentTermScore;
+        textRecordData.wsid = id;
+        if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
+          // Didn't insert because we already had this RecordId inside the map. This should only
+          // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
+          // Throw out the newer copy of the doc.
+          _ws->free(id);
+          return PlanStage::NEED_TIME;
+        }
+        //member->makeObjOwnedIfNeeded();
+        return PlanStage::NEED_TIME;
     } else if (PlanStage::IS_EOF == childStatus) {
 
         // Done with _currentChild, move to the next one.
@@ -172,10 +196,47 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             return PlanStage::NEED_TIME;
         }
 
+        if(!_wantTextScore) {
+          return PlanStage::IS_EOF;  
+        }
+
         _scoreIterator = _dataMap.begin();
         _internalState = State::kReturningResults;
 
         return PlanStage::NEED_TIME; 
+    }
+
+    // NEED_TIME, ERROR, NEED_YIELD, pass them up.
+    *out = id;
+    return childStatus;
+}
+
+PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
+    WorkingSetID id = WorkingSet::INVALID_ID;
+    StageState childStatus = _children[_currentChild]->work(&id);
+
+    if (PlanStage::ADVANCED == childStatus) {
+        WorkingSetMember* member = _ws->get(id);
+        // Maybe the child had an invalidation.  We intersect RecordId(s) so we can't do anything
+        // with this WSM.
+        if (!member->hasRecordId()) {
+            _ws->flagForReview(id);
+            return PlanStage::NEED_TIME;
+        }
+        
+        if(!_wantTextScore) {
+          *out = id;
+          return PlanStage::ADVANCED;
+        }
+        
+        TextRecordData textRecordData;
+        textRecordData.score = getIndexScore(member);
+        textRecordData.wsid = id;
+        if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
+          member->updateComputed(new TextScoreComputedData(textRecordData.score));
+        } else {
+          member->addComputed(new TextScoreComputedData(textRecordData.score));
+        }
     }
 
     // NEED_TIME, ERROR, NEED_YIELD, pass them up.
@@ -219,7 +280,7 @@ void TextOrStage::doInvalidate(OperationContext* opCtx, const RecordId& dl, Inva
     }
 
     DataMap::iterator it = _dataMap.find(dl);
-    if (_dedup && _dataMap.end() != it) {
+    if (_dataMap.end() != it) {
         WorkingSetID id = it->second.wsid;
         WorkingSetMember* member = _ws->get(id);
         verify(member->recordId == dl);

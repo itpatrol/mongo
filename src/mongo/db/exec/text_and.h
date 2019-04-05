@@ -56,12 +56,12 @@ public:
     TextAndStage(OperationContext* opCtx,
                  WorkingSet* ws,
                  const FTSSpec& ftsSpec,
-                 bool dedup,
+                 bool wantTextScore,
                  Children childrenToAdd);
     TextAndStage(OperationContext* opCtx,
                  WorkingSet* ws,
                  const FTSSpec& ftsSpec,
-                 bool dedup);
+                 bool wantTextScore);
     ~TextAndStage();
 
     void addChild(PlanStage* child);
@@ -114,7 +114,7 @@ private:
     size_t _currentChild;
 
     // True if we dedup on RecordId, false otherwise.
-    bool _dedup;
+    bool _wantTextScore;
 
     // Stats
     TextAndStats _specificStats;
