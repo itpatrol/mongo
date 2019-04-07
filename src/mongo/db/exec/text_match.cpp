@@ -52,10 +52,7 @@ TextMatchStage::TextMatchStage(OperationContext* opCtx,
                                const FTSQueryImpl& query,
                                const FTSSpec& spec,
                                WorkingSet* ws)
-    : PlanStage(kStageType, opCtx), 
-      _ftsMatcher(query, spec),
-      _ws(ws),
-      _isNegativeExcluded(false) {
+    : PlanStage(kStageType, opCtx), _ftsMatcher(query, spec), _ws(ws), _isNegativeExcluded(false) {
     _children.emplace_back(std::move(child));
 }
 
@@ -65,11 +62,11 @@ TextMatchStage::TextMatchStage(OperationContext* opCtx,
                                const FTSSpec& spec,
                                WorkingSet* ws,
                                bool isNegativeExcluded)
-    : PlanStage(kStageType, opCtx), 
-      _ftsMatcher(query, spec),  
+    : PlanStage(kStageType, opCtx),
+      _ftsMatcher(query, spec),
       _ws(ws),
       _isNegativeExcluded(isNegativeExcluded) {
-      _specificStats.isNegativeExcluded = _isNegativeExcluded;
+    _specificStats.isNegativeExcluded = _isNegativeExcluded;
     _children.emplace_back(std::move(child));
 }
 

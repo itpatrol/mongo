@@ -38,10 +38,10 @@
 #include "mongo/db/exec/index_scan.h"
 #include "mongo/db/exec/or.h"
 #include "mongo/db/exec/scoped_timer.h"
-#include "mongo/db/exec/text_match.h"
-#include "mongo/db/exec/text_or.h"
 #include "mongo/db/exec/text_and.h"
+#include "mongo/db/exec/text_match.h"
 #include "mongo/db/exec/text_nin.h"
+#include "mongo/db/exec/text_or.h"
 #include "mongo/db/exec/working_set.h"
 #include "mongo/db/fts/fts_index_format.h"
 #include "mongo/db/jsobj.h"
@@ -108,35 +108,35 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
 
     // return EOF stage for when no positive terms provided.
     std::set<std::string> termsForBounds = _params.query.getTermsForBounds();
-    if(0 == termsForBounds.size()) {
-      auto eofStage = make_unique<EOFStage>(
-          opCtx);
-      return eofStage;
+    if (0 == termsForBounds.size()) {
+        auto eofStage = make_unique<EOFStage>(opCtx);
+        return eofStage;
     }
 
     std::unique_ptr<PlanStage> textMatchStage;
 
     // Build fetching plan based on _params.query
-    
-    //First we need to retrive positive phrase indexes
-    std::vector<std::set<std::string>> positivePhrasesBounds = _params.query.getTermsPhrasesForBounds();
+
+    // First we need to retrive positive phrase indexes
+    std::vector<std::set<std::string>> positivePhrasesBounds =
+        _params.query.getTermsPhrasesForBounds();
     auto textORSearcher = make_unique<TextOrStage>(opCtx, ws, _params.spec, wantTextScore);
-    //auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
-    //auto textORSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, true);
+    // auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
+    // auto textORSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, true);
     std::vector<std::unique_ptr<PlanStage>> indexORScanList;
 
-    // We have positive phrases, retrive them separately 
-    if(0 < positivePhrasesBounds.size()) {
-      
-        // Create stage TextAnd for each phrase 
+    // We have positive phrases, retrive them separately
+    if (0 < positivePhrasesBounds.size()) {
+
+        // Create stage TextAnd for each phrase
         for (size_t i = 0; i < positivePhrasesBounds.size(); i++) {
             std::set<std::string> andTerms = positivePhrasesBounds[i];
             std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
             // OPTIMIZATION: If phrase is single term, add it directly ot TEXT_OR
-            if(1 == andTerms.size()) {
-              std::set<std::string>::const_iterator setIterator = andTerms.begin();
-              const auto& term = *setIterator;
-              IndexScanParams ixparams;
+            if (1 == andTerms.size()) {
+                std::set<std::string>::const_iterator setIterator = andTerms.begin();
+                const auto& term = *setIterator;
+                IndexScanParams ixparams;
 
                 ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
                     MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
@@ -147,26 +147,29 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 ixparams.descriptor = _params.index;
                 ixparams.direction = -1;
 
-                indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+                indexORScanList.push_back(
+                    stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
             } else {
-              // scan index for each term separately
-              for (const auto& term : andTerms) {
-                  IndexScanParams ixparams;
+                // scan index for each term separately
+                for (const auto& term : andTerms) {
+                    IndexScanParams ixparams;
 
-                  ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                      MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                  ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                      0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                  ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-                  ixparams.bounds.isSimpleRange = true;
-                  ixparams.descriptor = _params.index;
-                  ixparams.direction = -1;
+                    ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                        MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                    ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                        0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                    ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+                    ixparams.bounds.isSimpleRange = true;
+                    ixparams.descriptor = _params.index;
+                    ixparams.direction = -1;
 
-                  indexAndScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-              }
-              // Add TextAndStage to OR childrenList
-              
-              indexORScanList.push_back(stdx::make_unique<TextAndStage>(opCtx, ws,  _params.spec, wantTextScore, std::move(indexAndScanList)));
+                    indexAndScanList.push_back(
+                        stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+                }
+                // Add TextAndStage to OR childrenList
+
+                indexORScanList.push_back(stdx::make_unique<TextAndStage>(
+                    opCtx, ws, _params.spec, wantTextScore, std::move(indexAndScanList)));
             }
         }
         // Add single terms that did not match into prases
@@ -205,35 +208,36 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
     }
 
     std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
-    // OPTIMIZATION: If we have negative terms, lets get indexes and cut them out from all positive terms.
-    if(0 < negativeTerms.size()) {
-      std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
-      for (const auto& term : _params.query.getNegatedTerms()) {
-        IndexScanParams ixparams;
+    // OPTIMIZATION: If we have negative terms, lets get indexes and cut them out from all positive
+    // terms.
+    if (0 < negativeTerms.size()) {
+        std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
+        for (const auto& term : _params.query.getNegatedTerms()) {
+            IndexScanParams ixparams;
 
-        ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-            MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-        ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-            0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-        ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-        ixparams.bounds.isSimpleRange = true;
-        ixparams.descriptor = _params.index;
-        ixparams.direction = -1;
+            ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+            ixparams.bounds.isSimpleRange = true;
+            ixparams.descriptor = _params.index;
+            ixparams.direction = -1;
 
-        indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-      }
-      auto textNINStage = make_unique<TextNINStage>(
-        opCtx, ws, textORSearcher.release(), std::move(indexNINScanList));
+            indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+        }
+        auto textNINStage = make_unique<TextNINStage>(
+            opCtx, ws, textORSearcher.release(), std::move(indexNINScanList));
 
-      const MatchExpression* emptyFilter = nullptr;
-      auto fetchStage = make_unique<FetchStage>(
-          opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
+        const MatchExpression* emptyFilter = nullptr;
+        auto fetchStage = make_unique<FetchStage>(
+            opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
 
-      textMatchStage = make_unique<TextMatchStage>(
-          opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
-      return textMatchStage;
+        textMatchStage = make_unique<TextMatchStage>(
+            opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
+        return textMatchStage;
     }
-    
+
     const MatchExpression* emptyFilter = nullptr;
     auto fetchStage = make_unique<FetchStage>(
         opCtx, ws, textORSearcher.release(), emptyFilter, _params.index->getCollection());
@@ -241,7 +245,6 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
         opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
 
     return textMatchStage;
-
 }
 
 }  // namespace mongo

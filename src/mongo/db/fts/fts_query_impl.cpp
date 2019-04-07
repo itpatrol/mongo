@@ -89,9 +89,9 @@ Status FTSQueryImpl::parse(TextIndexVersion textIndexVersion) {
                     negativeTermSentence.append(s);
                     negativeTermSentence.push_back(' ');
                 } else {
-                    if(!inPhrase) {
-                      positiveSoloTermSentence.append(s);
-                      positiveSoloTermSentence.push_back(' ');
+                    if (!inPhrase) {
+                        positiveSoloTermSentence.append(s);
+                        positiveSoloTermSentence.push_back(' ');
                     }
                     positiveTermSentence.append(s);
                     positiveTermSentence.push_back(' ');
@@ -144,7 +144,7 @@ Status FTSQueryImpl::parse(TextIndexVersion textIndexVersion) {
     _addTerms(tokenizer.get(), negativeTermSentence, true);
 
     for (size_t i = 0; i < _positivePhrases.size(); i++) {
-      _addPhraseTerms(tokenizer.get(), _positivePhrases[i], false);
+        _addPhraseTerms(tokenizer.get(), _positivePhrases[i], false);
     }
 
     _addSoloTerms(tokenizer.get(), positiveSoloTermSentence, false);
@@ -223,16 +223,14 @@ void FTSQueryImpl::_addSoloTerms(FTSTokenizer* tokenizer, const string& sentence
         if (!negated) {
             _termsOutOfPhrasesForBounds.insert(word);
         }
-
     }
-
 }
 
 void FTSQueryImpl::_addPhraseTerms(FTSTokenizer* tokenizer, const string& sentence, bool negated) {
     tokenizer->reset(sentence.c_str(), FTSTokenizer::kFilterStopWords);
 
     auto ActiveTerms = std::set<std::string>();
-    
+
     // First, get all the terms for indexing, ie, lower cased words
     // If we are case-insensitive, we can also used this for positive, and negative terms
     // Some terms may be expanded into multiple words in some non-English languages

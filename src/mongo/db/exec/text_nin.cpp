@@ -45,24 +45,21 @@ using stdx::make_unique;
 const char* TextNINStage::kStageType = "TEXT_NIN";
 
 TextNINStage::TextNINStage(OperationContext* opCtx,
-  WorkingSet* ws,
-  PlanStage* child,
-  Children childrenToAdd)
-    : PlanStage(kStageType, opCtx),
-      _ws(ws),
-      _currentChild(0){
-        
-        for (size_t i = 0; i < childrenToAdd.size(); ++i) {
-          _specificStats._counter.push_back(0);
-        }
-        _children.insert(_children.end(),
-                        std::make_move_iterator(childrenToAdd.begin()),
-                        std::make_move_iterator(childrenToAdd.end()));
+                           WorkingSet* ws,
+                           PlanStage* child,
+                           Children childrenToAdd)
+    : PlanStage(kStageType, opCtx), _ws(ws), _currentChild(0) {
 
-        _children.emplace_back(child);
+    for (size_t i = 0; i < childrenToAdd.size(); ++i) {
         _specificStats._counter.push_back(0);
-        
-      }
+    }
+    _children.insert(_children.end(),
+                     std::make_move_iterator(childrenToAdd.begin()),
+                     std::make_move_iterator(childrenToAdd.end()));
+
+    _children.emplace_back(child);
+    _specificStats._counter.push_back(0);
+}
 
 void TextNINStage::addChild(PlanStage* child) {
     _children.emplace_back(child);
@@ -71,7 +68,7 @@ void TextNINStage::addChild(PlanStage* child) {
 
 void TextNINStage::addChildren(Children childrenToAdd) {
     for (size_t i = 0; i < childrenToAdd.size(); ++i) {
-      _specificStats._counter.push_back(0);
+        _specificStats._counter.push_back(0);
     }
     _children.insert(_children.end(),
                      std::make_move_iterator(childrenToAdd.begin()),
@@ -92,21 +89,21 @@ PlanStage::StageState TextNINStage::doWork(WorkingSetID* out) {
     StageState childStatus = _children[_currentChild]->work(&id);
 
     if (PlanStage::ADVANCED == childStatus) {
-        
+
         WorkingSetMember* member = _ws->get(id);
 
         ++_specificStats._counter[_currentChild];
 
-        
+
         if (member->hasRecordId()) {
             // Last child. Do filter
-            if(_currentChild == _children.size() - 1) {
-              //check if we seen it in exclude list
-              if (_seenMap.end() != _seenMap.find(member->recordId)) {
-                ++_specificStats.docsRejected;
-                _ws->free(id);
-                return PlanStage::NEED_TIME;
-              }
+            if (_currentChild == _children.size() - 1) {
+                // check if we seen it in exclude list
+                if (_seenMap.end() != _seenMap.find(member->recordId)) {
+                    ++_specificStats.docsRejected;
+                    _ws->free(id);
+                    return PlanStage::NEED_TIME;
+                }
             } else {
                 // Before last child
                 ++_specificStats.dupsTested;
@@ -119,7 +116,6 @@ PlanStage::StageState TextNINStage::doWork(WorkingSetID* out) {
                     // Otherwise, note that we've seen it.
                     _seenMap.insert(member->recordId);
                     member->makeObjOwnedIfNeeded();
-                    
                 }
                 return PlanStage::NEED_TIME;
             }
@@ -152,7 +148,9 @@ PlanStage::StageState TextNINStage::doWork(WorkingSetID* out) {
     return childStatus;
 }
 
-void TextNINStage::doInvalidate(OperationContext* opCtx, const RecordId& dl, InvalidationType type) {
+void TextNINStage::doInvalidate(OperationContext* opCtx,
+                                const RecordId& dl,
+                                InvalidationType type) {
     // TODO remove this since calling isEOF is illegal inside of doInvalidate().
     if (isEOF()) {
         return;

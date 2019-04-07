@@ -34,15 +34,15 @@
 #include <vector>
 
 #include "mongo/db/exec/plan_stage.h"
-#include "mongo/db/jsobj.h"
 #include "mongo/db/fts/fts_spec.h"
+#include "mongo/db/jsobj.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/unordered_map.h"
 #include "mongo/platform/unordered_set.h"
 
 namespace mongo {
 
-  using fts::FTSSpec;
+using fts::FTSSpec;
 
 /**
  * This stage outputs the union of its children.  It optionally deduplicates on RecordId.

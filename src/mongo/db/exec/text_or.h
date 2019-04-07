@@ -34,15 +34,15 @@
 #include <vector>
 
 #include "mongo/db/exec/plan_stage.h"
-#include "mongo/db/jsobj.h"
 #include "mongo/db/fts/fts_spec.h"
+#include "mongo/db/jsobj.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/unordered_map.h"
 #include "mongo/platform/unordered_set.h"
 
 namespace mongo {
 
-  using fts::FTSSpec;
+using fts::FTSSpec;
 
 /**
  * This stage outputs the union of its children.  It optionally deduplicates on RecordId.
@@ -67,9 +67,9 @@ public:
         kDone,
     };
     TextOrStage(OperationContext* opCtx,
-                 WorkingSet* ws,
-                 const FTSSpec& ftsSpec,
-                 bool wantTextScore);
+                WorkingSet* ws,
+                const FTSSpec& ftsSpec,
+                bool wantTextScore);
 
     void addChild(PlanStage* child);
 
@@ -92,10 +92,16 @@ public:
     static const char* kStageType;
 
 private:
-     /**
+    /**
      * Worker for Single CHild. Reads from the children, searching for the terms in the query and
      * populates the score map.
      */
+    StageState processNextdoWork(WorkingSetID* out);
+
+    /**
+    * Worker for Single CHild. Reads from the children, searching for the terms in the query and
+    * populates the score map.
+    */
     StageState readFromChild(WorkingSetID* out);
     /**
      * Worker for kReadingTerms. Reads from the children, searching for the terms in the query and
@@ -118,7 +124,7 @@ private:
 
     // The index spec used to determine where to find the score.
     FTSSpec _ftsSpec;
-    
+
 
     struct TextRecordData {
         TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0) {}
@@ -135,8 +141,8 @@ private:
 
     // Keeps track of what elements from _dataMap subsequent children have seen.
     // Only used while _hashingChildren.
-    //typedef unordered_set<RecordId, RecordId::Hasher> SeenMap;
-    //SeenMap _seenMap;
+    // typedef unordered_set<RecordId, RecordId::Hasher> SeenMap;
+    // SeenMap _seenMap;
 
     // What state are we in?  See the State enum above.
     State _internalState = State::kReadingTerms;

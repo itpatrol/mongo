@@ -55,15 +55,15 @@ TextAndStage::TextAndStage(OperationContext* opCtx,
       _ws(ws),
       _intersectingChildren(true),
       _currentChild(0),
-      _wantTextScore(wantTextScore){
-        _specificStats.wantTextScore = _wantTextScore;
-        for (size_t i = 0; i < childrenToAdd.size(); ++i) {
-          _specificStats._counter.push_back(0);
-        }
-        _children.insert(_children.end(),
-                        std::make_move_iterator(childrenToAdd.begin()),
-                        std::make_move_iterator(childrenToAdd.end()));
-      }
+      _wantTextScore(wantTextScore) {
+    _specificStats.wantTextScore = _wantTextScore;
+    for (size_t i = 0; i < childrenToAdd.size(); ++i) {
+        _specificStats._counter.push_back(0);
+    }
+    _children.insert(_children.end(),
+                     std::make_move_iterator(childrenToAdd.begin()),
+                     std::make_move_iterator(childrenToAdd.end()));
+}
 TextAndStage::TextAndStage(OperationContext* opCtx,
                            WorkingSet* ws,
                            const FTSSpec& ftsSpec,
@@ -73,9 +73,9 @@ TextAndStage::TextAndStage(OperationContext* opCtx,
       _ws(ws),
       _intersectingChildren(true),
       _currentChild(0),
-      _wantTextScore(wantTextScore){
-        _specificStats.wantTextScore = _wantTextScore;
-      }
+      _wantTextScore(wantTextScore) {
+    _specificStats.wantTextScore = _wantTextScore;
+}
 TextAndStage::~TextAndStage() {}
 
 void TextAndStage::addChild(PlanStage* child) {
@@ -85,7 +85,7 @@ void TextAndStage::addChild(PlanStage* child) {
 
 void TextAndStage::addChildren(Children childrenToAdd) {
     for (size_t i = 0; i < childrenToAdd.size(); ++i) {
-      _specificStats._counter.push_back(0);
+        _specificStats._counter.push_back(0);
     }
     _children.insert(_children.end(),
                      std::make_move_iterator(childrenToAdd.begin()),
@@ -111,13 +111,12 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
         return PlanStage::IS_EOF;
     }
 
-    
 
     WorkingSetID id = WorkingSet::INVALID_ID;
     StageState childStatus = _children[_currentChild]->work(&id);
 
     if (PlanStage::ADVANCED == childStatus) {
-        
+
         WorkingSetMember* member = _ws->get(id);
 
         ++_specificStats._counter[_currentChild];
@@ -129,32 +128,32 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
         }
 
         // On second and other child - check for _dataMap
-        if(0 < _currentChild) {
-          ++_specificStats.dupsTested;
-        
-          DataMap::iterator it = _dataMap.find(member->recordId);
-          // Not found, so dicard it as missing intersection.
-          if (_dataMap.end() == it) {
-            ++_specificStats.dupsDropped;
-            _ws->free(id);
-            return PlanStage::NEED_TIME;
-          } else {
-            if(_wantTextScore) {
-                // compute score here.
-                invariant(!member->keyData.empty());
-                // copy to keep 
-                const IndexKeyDatum newKeyData = member->keyData.back();
-                
-                BSONObjIterator keyIt(newKeyData.keyData);
-                for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
-                    keyIt.next();
+        if (0 < _currentChild) {
+            ++_specificStats.dupsTested;
+
+            DataMap::iterator it = _dataMap.find(member->recordId);
+            // Not found, so dicard it as missing intersection.
+            if (_dataMap.end() == it) {
+                ++_specificStats.dupsDropped;
+                _ws->free(id);
+                return PlanStage::NEED_TIME;
+            } else {
+                if (_wantTextScore) {
+                    // compute score here.
+                    invariant(!member->keyData.empty());
+                    // copy to keep
+                    const IndexKeyDatum newKeyData = member->keyData.back();
+
+                    BSONObjIterator keyIt(newKeyData.keyData);
+                    for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
+                        keyIt.next();
+                    }
+                    keyIt.next();  // Skip past 'term'.
+                    BSONElement scoreElement = keyIt.next();
+                    double documentTermScore = scoreElement.number();
+                    it->second.score += documentTermScore;
                 }
-                keyIt.next();  // Skip past 'term'.
-                BSONElement scoreElement = keyIt.next();
-                double documentTermScore = scoreElement.number();
-                it->second.score += documentTermScore;
             }
-          }
         }
         if (_seenMap.end() != _seenMap.find(member->recordId)) {
             // .We already seen it. Drop.
@@ -166,52 +165,53 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             _seenMap.insert(member->recordId);
         }
         // We read the first child into our hash table.
-        if(0 == _currentChild) {
-          TextRecordData textRecordData;
-          
-          if(_wantTextScore) {
-          // copy to keep 
-              const IndexKeyDatum newKeyData = member->keyData.back();
-              BSONObjIterator keyIt(newKeyData.keyData);
-              for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
-                  keyIt.next();
-              }
-              keyIt.next();  // Skip past 'term'.
-              BSONElement scoreElement = keyIt.next();
-              textRecordData.score = scoreElement.number();
-          }
-          textRecordData.wsid = id;
-                
-          if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
-            // Didn't insert because we already had this RecordId inside the map. This should only
-            // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
-            // Throw out the newer copy of the doc.
-            _ws->free(id);
+        if (0 == _currentChild) {
+            TextRecordData textRecordData;
+
+            if (_wantTextScore) {
+                // copy to keep
+                const IndexKeyDatum newKeyData = member->keyData.back();
+                BSONObjIterator keyIt(newKeyData.keyData);
+                for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
+                    keyIt.next();
+                }
+                keyIt.next();  // Skip past 'term'.
+                BSONElement scoreElement = keyIt.next();
+                textRecordData.score = scoreElement.number();
+            }
+            textRecordData.wsid = id;
+
+            if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
+                // Didn't insert because we already had this RecordId inside the map. This should
+                // only
+                // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
+                // Throw out the newer copy of the doc.
+                _ws->free(id);
+                return PlanStage::NEED_TIME;
+            }
+            // member->makeObjOwnedIfNeeded();
             return PlanStage::NEED_TIME;
-          }
-          //member->makeObjOwnedIfNeeded();
-          return PlanStage::NEED_TIME;
         }
         // It's last child - allow to ADVANCED
-        if(_currentChild == _children.size() - 1) {
-          if(_wantTextScore) {
-            DataMap::iterator it = _dataMap.find(member->recordId);
-            if (_dataMap.end() != it) {
-              if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
-                member->updateComputed(new TextScoreComputedData(it->second.score));
-              } else {
-                member->addComputed(new TextScoreComputedData(it->second.score));
-              }
+        if (_currentChild == _children.size() - 1) {
+            if (_wantTextScore) {
+                DataMap::iterator it = _dataMap.find(member->recordId);
+                if (_dataMap.end() != it) {
+                    if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
+                        member->updateComputed(new TextScoreComputedData(it->second.score));
+                    } else {
+                        member->addComputed(new TextScoreComputedData(it->second.score));
+                    }
+                }
             }
-          }
-          *out = id;
-          return PlanStage::ADVANCED;
+            *out = id;
+            return PlanStage::ADVANCED;
         }
         return PlanStage::NEED_TIME;
     } else if (PlanStage::IS_EOF == childStatus) {
-        
+
         // Done with second or more child. Need to cleanup not found.
-        if(0 < _currentChild) {
+        if (0 < _currentChild) {
             DataMap::iterator it = _dataMap.begin();
             while (it != _dataMap.end()) {
                 if (_seenMap.end() == _seenMap.find(it->first)) {
@@ -232,11 +232,11 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
             _intersectingChildren = false;
             return PlanStage::IS_EOF;
         }
-        
+
         // Last child. Do cleanup
-        if(_currentChild == _children.size() - 1) {
-          _intersectingChildren = false;
-          _dataMap.clear();
+        if (_currentChild == _children.size() - 1) {
+            _intersectingChildren = false;
+            _dataMap.clear();
         }
 
         // Done with _currentChild, move to the next one.
@@ -263,7 +263,9 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
     return childStatus;
 }
 
-void TextAndStage::doInvalidate(OperationContext* opCtx, const RecordId& dl, InvalidationType type) {
+void TextAndStage::doInvalidate(OperationContext* opCtx,
+                                const RecordId& dl,
+                                InvalidationType type) {
     // TODO remove this since calling isEOF is illegal inside of doInvalidate().
     if (isEOF()) {
         return;

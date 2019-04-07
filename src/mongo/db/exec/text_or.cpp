@@ -49,17 +49,17 @@ using stdx::make_unique;
 const char* TextOrStage::kStageType = "TEXT_OR";
 
 TextOrStage::TextOrStage(OperationContext* opCtx,
-                           WorkingSet* ws,
-                           const FTSSpec& ftsSpec,
-                           bool wantTextScore)
+                         WorkingSet* ws,
+                         const FTSSpec& ftsSpec,
+                         bool wantTextScore)
     : PlanStage(kStageType, opCtx),
       _ws(ws),
       _ftsSpec(ftsSpec),
       _currentChild(0),
       _indexerStatus(0),
-      _wantTextScore(wantTextScore){
-        _specificStats.wantTextScore = _wantTextScore;
-      }
+      _wantTextScore(wantTextScore) {
+    _specificStats.wantTextScore = _wantTextScore;
+}
 
 void TextOrStage::addChild(PlanStage* child) {
     _children.emplace_back(child);
@@ -88,9 +88,9 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 
     PlanStage::StageState stageState = PlanStage::IS_EOF;
     // Optimization for one child to process
-    if(1 == _children.size()) {
-      _specificStats.singleChild = true;
-      return readFromChild(out);
+    if (1 == _children.size()) {
+        _specificStats.singleChild = true;
+        return readFromChild(out);
     }
 
     switch (_internalState) {
@@ -110,20 +110,20 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 }
 
 double TextOrStage::getIndexScore(WorkingSetMember* member) {
-  if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
-    const TextScoreComputedData* score = static_cast<const TextScoreComputedData*>(
-                    member->getComputed(WSM_COMPUTED_TEXT_SCORE));
-    return score->getScore();
-  }
-  const IndexKeyDatum newKeyData = member->keyData.back();
-  
-  BSONObjIterator keyIt(newKeyData.keyData);
-  for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
-      keyIt.next();
-  }
-  keyIt.next();  // Skip past 'term'.
-  BSONElement scoreElement = keyIt.next();
-  return scoreElement.number();
+    if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
+        const TextScoreComputedData* score =
+            static_cast<const TextScoreComputedData*>(member->getComputed(WSM_COMPUTED_TEXT_SCORE));
+        return score->getScore();
+    }
+    const IndexKeyDatum newKeyData = member->keyData.back();
+
+    BSONObjIterator keyIt(newKeyData.keyData);
+    for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
+        keyIt.next();
+    }
+    keyIt.next();  // Skip past 'term'.
+    BSONElement scoreElement = keyIt.next();
+    return scoreElement.number();
 }
 
 PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
@@ -147,24 +147,26 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             return PlanStage::NEED_TIME;
         }
         ++_specificStats.dupsTested;
-        if(!_wantTextScore) {
-          if (_dataMap.end() != _dataMap.find(member->recordId)) {
-            ++_specificStats.dupsDropped;
-            _ws->free(id);
-            return PlanStage::NEED_TIME;
-          } else {
-            TextRecordData textRecordData;
-            textRecordData.wsid = id;
-            if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
-              // Didn't insert because we already had this RecordId inside the map. This should only
-              // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
-              // Throw out the newer copy of the doc.
-              _ws->free(id);
-              return PlanStage::NEED_TIME;
+        if (!_wantTextScore) {
+            if (_dataMap.end() != _dataMap.find(member->recordId)) {
+                ++_specificStats.dupsDropped;
+                _ws->free(id);
+                return PlanStage::NEED_TIME;
+            } else {
+                TextRecordData textRecordData;
+                textRecordData.wsid = id;
+                if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
+                    // Didn't insert because we already had this RecordId inside the map. This
+                    // should only
+                    // happen if we're seeing a newer copy of the same doc in a more recent
+                    // snapshot.
+                    // Throw out the newer copy of the doc.
+                    _ws->free(id);
+                    return PlanStage::NEED_TIME;
+                }
+                *out = id;
+                return PlanStage::ADVANCED;
             }
-            *out = id;
-            return PlanStage::ADVANCED;
-          }
         }
         double documentTermScore = getIndexScore(member);
         DataMap::iterator it = _dataMap.find(member->recordId);
@@ -180,13 +182,13 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         textRecordData.score = documentTermScore;
         textRecordData.wsid = id;
         if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
-          // Didn't insert because we already had this RecordId inside the map. This should only
-          // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
-          // Throw out the newer copy of the doc.
-          _ws->free(id);
-          return PlanStage::NEED_TIME;
+            // Didn't insert because we already had this RecordId inside the map. This should only
+            // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
+            // Throw out the newer copy of the doc.
+            _ws->free(id);
+            return PlanStage::NEED_TIME;
         }
-        //member->makeObjOwnedIfNeeded();
+        // member->makeObjOwnedIfNeeded();
         return PlanStage::NEED_TIME;
     } else if (PlanStage::IS_EOF == childStatus) {
 
@@ -198,14 +200,14 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             return PlanStage::NEED_TIME;
         }
 
-        if(!_wantTextScore) {
-          return PlanStage::IS_EOF;  
+        if (!_wantTextScore) {
+            return PlanStage::IS_EOF;
         }
 
         _scoreIterator = _dataMap.begin();
         _internalState = State::kReturningResults;
 
-        return PlanStage::NEED_TIME; 
+        return PlanStage::NEED_TIME;
     }
 
     // NEED_TIME, ERROR, NEED_YIELD, pass them up.
@@ -225,19 +227,19 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
             _ws->flagForReview(id);
             return PlanStage::NEED_TIME;
         }
-        
-        if(!_wantTextScore) {
-          *out = id;
-          return PlanStage::ADVANCED;
+
+        if (!_wantTextScore) {
+            *out = id;
+            return PlanStage::ADVANCED;
         }
-        
+
         TextRecordData textRecordData;
         textRecordData.score = getIndexScore(member);
         textRecordData.wsid = id;
         if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
-          member->updateComputed(new TextScoreComputedData(textRecordData.score));
+            member->updateComputed(new TextScoreComputedData(textRecordData.score));
         } else {
-          member->addComputed(new TextScoreComputedData(textRecordData.score));
+            member->addComputed(new TextScoreComputedData(textRecordData.score));
         }
     }
 
@@ -247,7 +249,7 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
 }
 
 PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
-    //LOG(3) << "stage returnResults";
+    // LOG(3) << "stage returnResults";
     if (_scoreIterator == _dataMap.end()) {
         _internalState = State::kDone;
         return PlanStage::IS_EOF;
@@ -256,7 +258,7 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     // Retrieve the record that contains the text score.
     TextRecordData textRecordData = _scoreIterator->second;
     ++_scoreIterator;
-      //LOG(3) << "stage returnResults " << textRecordData.wsid << " score" << textRecordData.score;
+    // LOG(3) << "stage returnResults " << textRecordData.wsid << " score" << textRecordData.score;
     // Ignore non-matched documents.
     if (textRecordData.score < 0) {
         invariant(textRecordData.wsid == WorkingSet::INVALID_ID);
@@ -266,9 +268,9 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     WorkingSetMember* wsm = _ws->get(textRecordData.wsid);
     // Populate the working set member with the text score and return it.
     if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
-      wsm->updateComputed(new TextScoreComputedData(textRecordData.score));
+        wsm->updateComputed(new TextScoreComputedData(textRecordData.score));
     } else {
-      wsm->addComputed(new TextScoreComputedData(textRecordData.score));
+        wsm->addComputed(new TextScoreComputedData(textRecordData.score));
     }
     *out = textRecordData.wsid;
     return PlanStage::ADVANCED;

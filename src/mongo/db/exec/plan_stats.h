@@ -677,13 +677,13 @@ struct TextMatchStats : public SpecificStats {
 };
 
 struct TextOrStats : public SpecificStats {
-    TextOrStats() 
+    TextOrStats()
         : wantTextScore(0),
           dupsTested(0),
           dupsDropped(0),
           singleChild(0),
           indexerCouter(0),
-          recordIdsForgotten(0){}
+          recordIdsForgotten(0) {}
 
     SpecificStats* clone() const final {
         TextOrStats* specific = new TextOrStats(*this);
@@ -693,22 +693,17 @@ struct TextOrStats : public SpecificStats {
     size_t dupsTested;
     size_t dupsDropped;
     bool singleChild;
-    
+
     // Indexer progress status
     std::vector<size_t> indexerCouter;
 
     size_t recordIdsForgotten;
-
 };
 
 
 struct TextAndStats : public SpecificStats {
-    TextAndStats() 
-        : wantTextScore(0),
-          dupsTested(0),
-          dupsDropped(0),
-          _counter(0),
-          recordIdsForgotten(0) {}
+    TextAndStats()
+        : wantTextScore(0), dupsTested(0), dupsDropped(0), _counter(0), recordIdsForgotten(0) {}
 
     SpecificStats* clone() const final {
         TextAndStats* specific = new TextAndStats(*this);
@@ -726,12 +721,8 @@ struct TextAndStats : public SpecificStats {
 
 
 struct TextNINStats : public SpecificStats {
-    TextNINStats() 
-        : dupsTested(0),
-          dupsDropped(0),
-          docsRejected(0),
-          _counter(0),
-          recordIdsForgotten(0) {}
+    TextNINStats()
+        : dupsTested(0), dupsDropped(0), docsRejected(0), _counter(0), recordIdsForgotten(0) {}
 
     SpecificStats* clone() const final {
         TextNINStats* specific = new TextNINStats(*this);
@@ -746,7 +737,6 @@ struct TextNINStats : public SpecificStats {
     std::vector<size_t> _counter;
 
     size_t recordIdsForgotten;
-
 };
 
 }  // namespace mongo
