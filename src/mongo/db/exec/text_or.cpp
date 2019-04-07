@@ -56,15 +56,22 @@ TextOrStage::TextOrStage(OperationContext* opCtx,
       _ws(ws),
       _ftsSpec(ftsSpec),
       _currentChild(0),
+      _indexerStatus(0),
       _wantTextScore(wantTextScore){
         _specificStats.wantTextScore = _wantTextScore;
       }
 
 void TextOrStage::addChild(PlanStage* child) {
     _children.emplace_back(child);
+    _specificStats.indexerCouter.push_back(0);
+    _indexerStatus.push_back(0);
 }
 
 void TextOrStage::addChildren(Children childrenToAdd) {
+    for (size_t i = 0; i < childrenToAdd.size(); ++i) {
+        _specificStats.indexerCouter.push_back(0);
+        _indexerStatus.push_back(0);
+    }
     _children.insert(_children.end(),
                      std::make_move_iterator(childrenToAdd.begin()),
                      std::make_move_iterator(childrenToAdd.end()));
@@ -109,10 +116,6 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
     return score->getScore();
   }
   const IndexKeyDatum newKeyData = member->keyData.back();
-  /*for (size_t i = 0; i < member->keyData.size(); ++i) {
-      //LOG(3) << "indexKeyPattern [" << i << "]" << member->keyData[i].indexKeyPattern;
-      //LOG(3) << "key data [" << i << "]" << member->keyData[i].keyData;
-  }*/
   
   BSONObjIterator keyIt(newKeyData.keyData);
   for (unsigned i = 0; i < _ftsSpec.numExtraBefore(); i++) {
@@ -124,7 +127,6 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
 }
 
 PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
-  //LOG(3) << "stage readFromChildren";
     // Check to see if there were any children added in the first place.
     if (_children.size() == 0) {
         _internalState = State::kDone;
@@ -262,7 +264,6 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     }
 
     WorkingSetMember* wsm = _ws->get(textRecordData.wsid);
-
     // Populate the working set member with the text score and return it.
     if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
       wsm->updateComputed(new TextScoreComputedData(textRecordData.score));

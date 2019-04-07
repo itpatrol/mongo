@@ -144,6 +144,11 @@ private:
     // Which of _children are we calling work(...) on now?
     size_t _currentChild = 0;
 
+    // Track the status of the child work progress
+    // 0-N - number of processed items
+    // -1 - mean EOF from the child
+    std::vector<size_t> _indexerStatus;
+
     // True if we dedup on RecordId, false otherwise.
     bool _wantTextScore;
 

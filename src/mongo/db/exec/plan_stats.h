@@ -682,6 +682,7 @@ struct TextOrStats : public SpecificStats {
           dupsTested(0),
           dupsDropped(0),
           singleChild(0),
+          indexerCouter(0),
           recordIdsForgotten(0){}
 
     SpecificStats* clone() const final {
@@ -692,6 +693,9 @@ struct TextOrStats : public SpecificStats {
     size_t dupsTested;
     size_t dupsDropped;
     bool singleChild;
+    
+    // Indexer progress status
+    std::vector<size_t> indexerCouter;
 
     size_t recordIdsForgotten;
 
