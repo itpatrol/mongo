@@ -90,14 +90,25 @@ public:
     const SpecificStats* getSpecificStats() const final;
 
     static const char* kStageType;
+    static const size_t kChildIsEOF;
 
 private:
-    /**
-     * Worker for Single CHild. Reads from the children, searching for the terms in the query and
-     * populates the score map.
-     */
-    StageState processNextdoWork(WorkingSetID* out);
 
+    // Private State function for doing cyrcle rotate reading on each index.
+    struct currentWorkState {
+        currentWorkState() : wsid(WorkingSet::INVALID_ID), childStatus(StageState::IS_EOF) {}
+        WorkingSetID wsid;
+        StageState childStatus;
+    };
+    currentWorkState _currentWorkState;
+    /**
+     * get data from next child
+     */
+    bool processNextDoWork();
+    /**
+     * Is all children get to EOF?
+     */
+    bool isChildrenEOF();
     /**
     * Worker for Single CHild. Reads from the children, searching for the terms in the query and
     * populates the score map.

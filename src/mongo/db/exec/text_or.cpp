@@ -28,7 +28,7 @@
  *    it in the license file.
  */
 
-//#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
 
 #include "mongo/db/exec/text_or.h"
 
@@ -37,7 +37,7 @@
 #include "mongo/db/exec/working_set_computed_data.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/mongoutils/str.h"
-//#include "mongo/util/log.h"
+#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -47,6 +47,7 @@ using stdx::make_unique;
 
 // static
 const char* TextOrStage::kStageType = "TEXT_OR";
+const size_t TextOrStage::kChildIsEOF = -1;
 
 TextOrStage::TextOrStage(OperationContext* opCtx,
                          WorkingSet* ws,
@@ -126,7 +127,55 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
     return scoreElement.number();
 }
 
+bool TextOrStage::isChildrenEOF(){
+  for (size_t i = 0; i < _children.size(); ++i) {
+      if(kChildIsEOF != _indexerStatus[i]) {
+          // We have another child to read from.
+          LOG(3) << "Is not EOF " << i << " " << _indexerStatus[i];
+          return false;
+      }
+      LOG(3) << "Is EOF " << i << " " << _indexerStatus[i];
+  }
+  LOG(3) << "Is EOF " << _children.size();
+  return true;
+}
+
+bool TextOrStage::processNextDoWork(){
+    // Checking next 
+    size_t isCheckingNextLength = _children.size();
+
+    while(0 < isCheckingNextLength) {
+        ++_currentChild;
+
+        // If we out of range for _children - begin from first one
+        if(_currentChild == _children.size()) {
+            _currentChild = 0;
+        }
+        if(kChildIsEOF != _indexerStatus[_currentChild]) {
+            LOG(3) << "next Child " << _currentChild << " state" << _indexerStatus[_currentChild];
+            break;
+        }
+        --isCheckingNextLength;
+    }
+    if(0 == isCheckingNextLength) {
+      LOG(3) << "All processed ";
+      // Nothing left to process.
+      return false;
+    }
+    LOG(3) << "process For Child " << _currentChild;
+    _currentWorkState.wsid = WorkingSet::INVALID_ID;
+    _currentWorkState.childStatus = _children[_currentChild]->work(&_currentWorkState.wsid);
+
+    // Update stats counters.
+    ++_specificStats.indexerCouter[_currentChild];
+    if(kChildIsEOF != _indexerStatus[_currentChild]) {
+      ++_indexerStatus[_currentChild];
+    }
+    return true;
+}
+
 PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
+  LOG(3) << "stage readFromChildren";
     // Check to see if there were any children added in the first place.
     if (_children.size() == 0) {
         _internalState = State::kDone;
@@ -134,37 +183,40 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
     }
     invariant(_currentChild < _children.size());
 
-    WorkingSetID id = WorkingSet::INVALID_ID;
-    StageState childStatus = _children[_currentChild]->work(&id);
 
+    if(!processNextDoWork()) {
+      return PlanStage::IS_EOF;
+    }
 
-    if (PlanStage::ADVANCED == childStatus) {
-        WorkingSetMember* member = _ws->get(id);
+    
+    if (PlanStage::ADVANCED == _currentWorkState.childStatus) {
+        LOG(3) << "stage readFromChildren::ADVANCED";
+        WorkingSetMember* member = _ws->get(_currentWorkState.wsid);
         // Maybe the child had an invalidation.  We intersect RecordId(s) so we can't do anything
         // with this WSM.
         if (!member->hasRecordId()) {
-            _ws->flagForReview(id);
+            _ws->flagForReview(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
         }
         ++_specificStats.dupsTested;
         if (!_wantTextScore) {
             if (_dataMap.end() != _dataMap.find(member->recordId)) {
                 ++_specificStats.dupsDropped;
-                _ws->free(id);
+                _ws->free(_currentWorkState.wsid);
                 return PlanStage::NEED_TIME;
             } else {
                 TextRecordData textRecordData;
-                textRecordData.wsid = id;
+                textRecordData.wsid = _currentWorkState.wsid;
                 if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
                     // Didn't insert because we already had this RecordId inside the map. This
                     // should only
                     // happen if we're seeing a newer copy of the same doc in a more recent
                     // snapshot.
                     // Throw out the newer copy of the doc.
-                    _ws->free(id);
+                    _ws->free(_currentWorkState.wsid);
                     return PlanStage::NEED_TIME;
                 }
-                *out = id;
+                *out = _currentWorkState.wsid;
                 return PlanStage::ADVANCED;
             }
         }
@@ -174,30 +226,32 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         if (_dataMap.end() != it) {
             it->second.score += documentTermScore;
             ++_specificStats.dupsDropped;
-            _ws->free(id);
+            _ws->free(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
         }
 
         TextRecordData textRecordData;
         textRecordData.score = documentTermScore;
-        textRecordData.wsid = id;
+        textRecordData.wsid = _currentWorkState.wsid;
         if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
+            LOG(3) << "that is should not happen " << member->recordId;
             // Didn't insert because we already had this RecordId inside the map. This should only
             // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
             // Throw out the newer copy of the doc.
-            _ws->free(id);
+            _ws->free(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
         }
         // member->makeObjOwnedIfNeeded();
         return PlanStage::NEED_TIME;
-    } else if (PlanStage::IS_EOF == childStatus) {
+    } else if (PlanStage::IS_EOF == _currentWorkState.childStatus) {
+        LOG(3) << "stage readFromChildren::IS_EOF " << _currentChild;
+        // Done with _currentChild, mark so.
+        _indexerStatus[_currentChild] = kChildIsEOF;
+        LOG(3) << "set EOF " << _currentChild << _indexerStatus[_currentChild];
 
-        // Done with _currentChild, move to the next one.
-        ++_currentChild;
-
-        if (_currentChild < _children.size()) {
-            // We have another child to read from.
-            return PlanStage::NEED_TIME;
+        // Check if we done with all children
+        if(!isChildrenEOF()) {
+          return PlanStage::NEED_TIME;
         }
 
         if (!_wantTextScore) {
@@ -209,33 +263,35 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
 
         return PlanStage::NEED_TIME;
     }
-
+    LOG(3) << "stage readFromChildren::UNKNOWN";
     // NEED_TIME, ERROR, NEED_YIELD, pass them up.
-    *out = id;
-    return childStatus;
+    *out = _currentWorkState.wsid;
+    return _currentWorkState.childStatus;
 }
 
 PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
-    WorkingSetID id = WorkingSet::INVALID_ID;
-    StageState childStatus = _children[_currentChild]->work(&id);
-
-    if (PlanStage::ADVANCED == childStatus) {
-        WorkingSetMember* member = _ws->get(id);
+    LOG(3) << "stage readFromChild";
+    if(!processNextDoWork()) {
+      return PlanStage::IS_EOF;
+    }
+    
+    if (PlanStage::ADVANCED == _currentWorkState.childStatus) {
+        WorkingSetMember* member = _ws->get(_currentWorkState.wsid);
         // Maybe the child had an invalidation.  We intersect RecordId(s) so we can't do anything
         // with this WSM.
         if (!member->hasRecordId()) {
-            _ws->flagForReview(id);
+            _ws->flagForReview(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
         }
 
         if (!_wantTextScore) {
-            *out = id;
+            *out = _currentWorkState.wsid;
             return PlanStage::ADVANCED;
         }
 
         TextRecordData textRecordData;
         textRecordData.score = getIndexScore(member);
-        textRecordData.wsid = id;
+        textRecordData.wsid = _currentWorkState.wsid;
         if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
             member->updateComputed(new TextScoreComputedData(textRecordData.score));
         } else {
@@ -244,12 +300,12 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
     }
 
     // NEED_TIME, ERROR, NEED_YIELD, pass them up.
-    *out = id;
-    return childStatus;
+    *out = _currentWorkState.wsid;
+    return _currentWorkState.childStatus;
 }
 
 PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
-    // LOG(3) << "stage returnResults";
+    LOG(3) << "stage returnResults";
     if (_scoreIterator == _dataMap.end()) {
         _internalState = State::kDone;
         return PlanStage::IS_EOF;
@@ -258,7 +314,6 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     // Retrieve the record that contains the text score.
     TextRecordData textRecordData = _scoreIterator->second;
     ++_scoreIterator;
-    // LOG(3) << "stage returnResults " << textRecordData.wsid << " score" << textRecordData.score;
     // Ignore non-matched documents.
     if (textRecordData.score < 0) {
         invariant(textRecordData.wsid == WorkingSet::INVALID_ID);
