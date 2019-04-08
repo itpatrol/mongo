@@ -31,14 +31,20 @@
 
 #pragma once
 
+#include "mongo/platform/basic.h"
+
 #include <vector>
 
+
 #include "mongo/db/exec/plan_stage.h"
+#include "mongo/db/exec/text_map_index.h"
 #include "mongo/db/fts/fts_spec.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/record_id.h"
 #include "mongo/platform/unordered_map.h"
 #include "mongo/platform/unordered_set.h"
+#include "mongo/stdx/functional.h"
+
 
 namespace mongo {
 
@@ -152,6 +158,8 @@ private:
         bool collected;
         //size_t _collectedNum;
     };
+
+    TextMapIndex _dataIndexMap;
 
     // _dataMap is filled out by the first child and probed by subsequent children.  This is the
     // hash table that we create by intersecting _children and probe with the last child.

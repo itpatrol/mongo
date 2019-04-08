@@ -45,6 +45,14 @@ using std::unique_ptr;
 using std::vector;
 using stdx::make_unique;
 
+
+/*
+std::size_t hash_value(RecordId const& b){
+    RecordId::Hasher hasher;
+    return hasher(b);
+};*/
+
+
 // static
 const char* TextOrStage::kStageType = "TEXT_OR";
 const size_t TextOrStage::kChildIsEOF = -1;
@@ -99,10 +107,10 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 
     switch (_internalState) {
         case State::kReadingTerms:
-            stageState = returnReadyResults(out);
+            /*stageState = returnReadyResults(out);
             if(stageState != PlanStage::IS_EOF) {
                 return stageState;
-            }
+            }*/
             stageState = readFromChildren(out);
             break;
         case State::kReturningResults:
@@ -229,7 +237,35 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
                 return PlanStage::ADVANCED;
             }
         }
+
+        
+        //auto& indexByRecordID = _dataIndexMap.get<IndexByRecordId>();
+        
+
         double documentTermScore = getIndexScore(member);
+
+        //auto itFound = indexByRecordID.find(member->recordId);
+        //LOG(3) << "Count " << indexByRecordID.count(member->recordId);
+
+        TextMapIndex::IndexData recordData = _dataIndexMap.find(member->recordId);
+        if(recordData.score > 0) {
+          recordData.score += documentTermScore;
+          recordData.scoreTerms[_currentChild] = documentTermScore;
+          LOG(3) << "Found in TextMapIndex" 
+                 << "recordID" << recordData.recordId 
+                 << "wsid" << recordData.wsid 
+                 << "score " << recordData.score;
+        } else {
+          recordData.recordId = member->recordId;
+          recordData.wsid = _currentWorkState.wsid;
+          recordData.score = documentTermScore;
+          recordData.scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
+          recordData.scoreTerms[_currentChild] = documentTermScore;
+          LOG(3) << "Insert into TextMapIndex";
+          _dataIndexMap.insert(recordData);
+        }
+
+
         DataMap::iterator it = _dataMap.find(member->recordId);
         // Found. Store extra.
         if (_dataMap.end() != it) {
@@ -256,6 +292,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             _ws->free(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
         }
+        
 
         TextRecordData textRecordData;
         textRecordData.score = documentTermScore;
@@ -350,6 +387,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     DataMap::iterator topFirstCursor;
     DataMap::iterator topSecondCursor;
     DataMap::iterator _topScoreIterator = _dataMap.begin();
+
     while(_topScoreIterator != _dataMap.end()) {
         currentRecord = _topScoreIterator->second;
         // If already processed - skip it.
@@ -448,7 +486,11 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
 
 PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     LOG(3) << "stage returnResults";
+    LOG(3) << "stage End" << _dataIndexMap.size();
+
     if (_scoreIterator == _dataMap.end()) {
+        
+
         _internalState = State::kDone;
         return PlanStage::IS_EOF;
     }
