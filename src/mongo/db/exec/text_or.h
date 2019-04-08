@@ -121,6 +121,11 @@ private:
     StageState readFromChildren(WorkingSetID* out);
 
     /**
+     * Worker to send back result that is ready by score race.
+     */
+    StageState returnReadyResults(WorkingSetID* out);
+
+    /**
      * Worker for kReturningResults. Returns a wsm with RecordID and Score.
      */
     StageState returnResults(WorkingSetID* out);
@@ -138,9 +143,14 @@ private:
 
 
     struct TextRecordData {
-        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0) {}
+        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {
+        }
         WorkingSetID wsid;
         double score;
+        bool advanced;
+        std::vector<double> scoreTerms;
+        bool collected;
+        //size_t _collectedNum;
     };
 
     // _dataMap is filled out by the first child and probed by subsequent children.  This is the
@@ -165,6 +175,9 @@ private:
     // 0-N - number of processed items
     // -1 - mean EOF from the child
     std::vector<size_t> _indexerStatus;
+
+    // Collect latest document score per child
+    std::vector<double> _scoreStatus;
 
     // True if we dedup on RecordId, false otherwise.
     bool _wantTextScore;

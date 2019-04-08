@@ -58,6 +58,7 @@ TextOrStage::TextOrStage(OperationContext* opCtx,
       _ftsSpec(ftsSpec),
       _currentChild(0),
       _indexerStatus(0),
+      _scoreStatus(0),
       _wantTextScore(wantTextScore) {
     _specificStats.wantTextScore = _wantTextScore;
 }
@@ -66,12 +67,14 @@ void TextOrStage::addChild(PlanStage* child) {
     _children.emplace_back(child);
     _specificStats.indexerCouter.push_back(0);
     _indexerStatus.push_back(0);
+    _scoreStatus.push_back(0);
 }
 
 void TextOrStage::addChildren(Children childrenToAdd) {
     for (size_t i = 0; i < childrenToAdd.size(); ++i) {
         _specificStats.indexerCouter.push_back(0);
         _indexerStatus.push_back(0);
+        _scoreStatus.push_back(0);
     }
     _children.insert(_children.end(),
                      std::make_move_iterator(childrenToAdd.begin()),
@@ -96,6 +99,10 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 
     switch (_internalState) {
         case State::kReadingTerms:
+            stageState = returnReadyResults(out);
+            if(stageState != PlanStage::IS_EOF) {
+                return stageState;
+            }
             stageState = readFromChildren(out);
             break;
         case State::kReturningResults:
@@ -114,7 +121,8 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
     if (member->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
         const TextScoreComputedData* score =
             static_cast<const TextScoreComputedData*>(member->getComputed(WSM_COMPUTED_TEXT_SCORE));
-        return score->getScore();
+        _scoreStatus[_currentChild] = score->getScore();
+        return _scoreStatus[_currentChild];
     }
     const IndexKeyDatum newKeyData = member->keyData.back();
 
@@ -124,7 +132,8 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
     }
     keyIt.next();  // Skip past 'term'.
     BSONElement scoreElement = keyIt.next();
-    return scoreElement.number();
+    _scoreStatus[_currentChild] = scoreElement.number();
+    return _scoreStatus[_currentChild];
 }
 
 bool TextOrStage::isChildrenEOF(){
@@ -225,6 +234,24 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         // Found. Store extra.
         if (_dataMap.end() != it) {
             it->second.score += documentTermScore;
+            it->second.scoreTerms[_currentChild] = documentTermScore;
+            /*++it->second._collectedNum;
+            if(it->second._collectedNum == it->second.scoreTerms.size()) {
+              it->second.collected = true;
+            }*/
+
+            // Validate if recordID is collected all terms.
+            bool collected = true;
+            for (size_t i = 0; i < it->second.scoreTerms.size(); ++i) {
+                if(0 == it->second.scoreTerms[i]) {
+                  collected = false;
+                  break;
+                }
+            }
+            if(collected) {
+              it->second.collected = true;
+            }
+
             ++_specificStats.dupsDropped;
             _ws->free(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
@@ -233,6 +260,9 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         TextRecordData textRecordData;
         textRecordData.score = documentTermScore;
         textRecordData.wsid = _currentWorkState.wsid;
+        // TODO: Maybe wrap into initialization of the variable.
+        textRecordData.scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
+        textRecordData.scoreTerms[_currentChild] = documentTermScore;
         if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
             LOG(3) << "that is should not happen " << member->recordId;
             // Didn't insert because we already had this RecordId inside the map. This should only
@@ -247,6 +277,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         LOG(3) << "stage readFromChildren::IS_EOF " << _currentChild;
         // Done with _currentChild, mark so.
         _indexerStatus[_currentChild] = kChildIsEOF;
+        _scoreStatus[_currentChild] = 0;
         LOG(3) << "set EOF " << _currentChild << _indexerStatus[_currentChild];
 
         // Check if we done with all children
@@ -259,6 +290,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         }
 
         _scoreIterator = _dataMap.begin();
+        // We need to sort _dataMap by score.
         _internalState = State::kReturningResults;
 
         return PlanStage::NEED_TIME;
@@ -302,6 +334,116 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
     // NEED_TIME, ERROR, NEED_YIELD, pass them up.
     *out = _currentWorkState.wsid;
     return _currentWorkState.childStatus;
+}
+PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
+    LOG(3) << "stage returnReadyResults";
+    // If we already in kReturningResults, pass request there.
+    if(_internalState == State::kReturningResults) {
+      return PlanStage::IS_EOF;
+    }
+
+    TextRecordData topFirst;
+    TextRecordData topSecond;
+    TextRecordData currentRecord;
+    mongo::RecordId firstRecordID;
+    mongo::RecordId secondRecordID;
+    DataMap::iterator topFirstCursor;
+    DataMap::iterator topSecondCursor;
+    DataMap::iterator _topScoreIterator = _dataMap.begin();
+    while(_topScoreIterator != _dataMap.end()) {
+        currentRecord = _topScoreIterator->second;
+        // If already processed - skip it.
+        if(currentRecord.advanced) {
+            ++_topScoreIterator;
+            continue;
+        }
+        if(currentRecord.collected) {
+          LOG(3) << "collected found " << currentRecord.score; 
+          if(currentRecord.score > topFirst.score) {
+            //secondRecordID = firstRecordID;
+            firstRecordID = _topScoreIterator->first;
+            topFirstCursor = _topScoreIterator;
+            //topSecond = topFirst;
+            topFirst = currentRecord;
+          }
+        } else {
+          if(currentRecord.score > topSecond.score) {
+            //secondRecordID = firstRecordID;
+            secondRecordID = _topScoreIterator->first;
+            topSecondCursor = _topScoreIterator;
+            //topSecond = topFirst;
+            topSecond = currentRecord;
+          }
+        }
+        ++_topScoreIterator;
+    }
+    double currentAllTermsScore = 0;
+    for (size_t i = 0; i < _scoreStatus.size(); ++i) {
+        currentAllTermsScore += _scoreStatus[i];
+        LOG(3) << "currentTermScore " << i << " " << _scoreStatus[i];
+    }
+    LOG(3) << "currentAllTermsScore " << currentAllTermsScore ;
+
+
+    if(0 == currentAllTermsScore) {
+      return PlanStage::IS_EOF;
+    }
+
+
+
+
+    LOG(3) << "topFirst " << topFirst.wsid 
+             << " ID " << firstRecordID
+//             << " control " << topFirstCursor->first
+             << " score " << topFirst.score;
+    for (size_t i = 0; i < topFirst.scoreTerms.size(); ++i) {
+        LOG(3) << "term " << i << " " << topFirst.scoreTerms[i];
+    }
+
+    LOG(3) << "topSecond " << topSecond.wsid 
+             << " ID " << secondRecordID
+             << " score " << topSecond.score;
+    for (size_t i = 0; i < topSecond.scoreTerms.size(); ++i) {
+        LOG(3) << "term " << i << " " << topSecond.scoreTerms[i];
+    }
+
+    if( 0 == topFirst.score) {
+      return PlanStage::IS_EOF;
+    }
+    
+    if(topFirst.score > topSecond.score) {
+      double totalScoreDiff = topFirst.score - topSecond.score;
+      double expectedMaxScoreForSecond = 0;
+      for (size_t i = 0; i < topSecond.scoreTerms.size(); ++i) {
+        if(0 == topSecond.scoreTerms[i])  {
+          expectedMaxScoreForSecond += _scoreStatus[i];
+        }
+      }
+      LOG(3) << "totalScoreDiff  " << totalScoreDiff
+             << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
+      if(totalScoreDiff > expectedMaxScoreForSecond) {
+        LOG(3) << "Advance " << topFirst.wsid 
+              << " ID " << firstRecordID
+              << " control " << topFirstCursor->first
+              << " score " << topFirst.score;
+
+        // topFirstCursor->second.advanced = true;
+        //topFirst.advanced = true;
+        topFirstCursor->second.advanced = true;
+        WorkingSetMember* wsm = _ws->get(topFirst.wsid);
+        // Populate the working set member with the text score and return it.
+        if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
+            wsm->updateComputed(new TextScoreComputedData(topFirst.score));
+        } else {
+            wsm->addComputed(new TextScoreComputedData(topFirst.score));
+        }
+        *out = topFirst.wsid;
+        return PlanStage::ADVANCED;
+      }
+    }
+
+    return PlanStage::IS_EOF;
+
 }
 
 PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
