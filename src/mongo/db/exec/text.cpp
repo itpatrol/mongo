@@ -131,8 +131,10 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 std::set<std::string> andTerms = positivePhrasesBounds[i];
                 std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
 
-                // scan index for each term separately
-                for (const auto& term : andTerms) {
+                // OPTIMIZATION: If phrase is single term, add it directly ot TEXT_OR
+                if (1 == andTerms.size()) {
+                    std::set<std::string>::const_iterator setIterator = andTerms.begin();
+                    const auto& term = *setIterator;
                     IndexScanParams ixparams;
 
                     ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
@@ -144,10 +146,30 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                     ixparams.descriptor = _params.index;
                     ixparams.direction = -1;
 
-                    indexAndScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+                    indexORScanList.push_back(
+                        stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+                } else {
+                    // scan index for each term separately
+                    for (const auto& term : andTerms) {
+                        IndexScanParams ixparams;
+
+                        ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                            MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                        ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                            0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                        ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+                        ixparams.bounds.isSimpleRange = true;
+                        ixparams.descriptor = _params.index;
+                        ixparams.direction = -1;
+
+                        indexAndScanList.push_back(
+                            stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+                    }
+                    // Add TextAndStage to OR childrenList
+
+                    indexORScanList.push_back(stdx::make_unique<TextAndStage>(
+                        opCtx, ws, _params.spec, wantTextScore, std::move(indexAndScanList)));
                 }
-                // Add TextAndStage to OR childrenList
-                indexORScanList.push_back(stdx::make_unique<TextAndStage>(opCtx, ws, true, std::move(indexAndScanList)));
             }
             // Add single terms that did not match into prases
             for (const auto& term : _params.query.getTermsOutOfPhrasesForBounds()) {
