@@ -161,6 +161,8 @@ private:
 
     TextMapIndex _dataIndexMap;
 
+    //TextMapIndex::const_iterator _scoreIndexMapIterator;
+
     // _dataMap is filled out by the first child and probed by subsequent children.  This is the
     // hash table that we create by intersecting _children and probe with the last child.
     typedef unordered_map<RecordId, TextRecordData, RecordId::Hasher> DataMap;

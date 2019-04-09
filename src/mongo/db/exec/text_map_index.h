@@ -55,18 +55,85 @@ public:
           >,
           ordered_non_unique<  //ordered index over 'i1'
             tag<Score>, // give that index a name
-            member<IndexData, double, &IndexData::score> // what will be the index's key
+            member<IndexData, double, &IndexData::score>,
+            std::greater<double> // what will be the index's key
           >
       >
     >;
 
-    IndexData find(const RecordId& recordId) {
+    typedef IndexContainer::index<Score>::type ScoreIndex;
+    typedef IndexContainer::index<Records>::type RecordIndex;
+
+    //TextMapIndex::const_iterator = IndexContainer::nth_index<1>::type::iterator;
+
+   /* RecordIndex::iterator findByID(const RecordId& recordId) {
       auto it = boost::multi_index::get<Records>(_container).find(recordId);
       if (it != boost::multi_index::get<Records>(_container).end()) {
-        return *it;
+        return it;
       }
-      return IndexData();
+      return void;
+    }*/
+
+    RecordIndex::iterator findByID(const RecordId& recordId) {
+      return boost::multi_index::get<Records>(_container).find(recordId);
     }
+
+    RecordIndex::iterator endRecords() {
+      return boost::multi_index::get<Records>(_container).end();
+    }
+
+    struct updateIndex {
+      updateIndex(size_t termID, double newScore):termID(termID), newScore(newScore){}
+
+      void operator()(IndexData& record)
+      {
+        record.score += newScore;
+        record.scoreTerms[termID] = newScore;
+      }
+
+    private:
+      size_t termID;
+      double newScore;
+    };
+
+    void update(RecordIndex::iterator it, size_t termID, double newScore) {
+      _container.modify(it, updateIndex(termID, newScore));
+    }
+
+    //bool updateScore()
+
+    /*bool setByID(RecordId recordId, WorkingSetID wsid, double score, std::vector<double> scoreTerms) {
+      auto it = boost::multi_index::get<Records>(_container).find(recordId);
+      if (it != boost::multi_index::get<Records>(_container).end()) {
+        IndexData currentRecord = *it;
+      }
+      IndexData newRecord;
+      recordData.recordId = member->recordId;
+      recordData.wsid = _currentWorkState.wsid;
+      recordData.score = score;
+      recordData.scoreTerms = scoreTerms;
+      recordData.scoreTerms[_currentChild] = documentTermScore;
+    }*/
+
+    void resetScopeIterator() {
+      _scoreIterator = boost::multi_index::get<Score>(_container).begin();
+    }
+
+    IndexData nextScore(){
+      ++_scoreIterator;
+      if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
+        return IndexData();
+      }
+      return *_scoreIterator;
+    }
+
+    /*auto findByScoreAll() {
+      auto it = boost::multi_index::get<Score>(_container).begin();
+      if (it != boost::multi_index::get<Score>(_container).end()) {
+        return it;
+      }
+      return nullptr;
+    }*/
 
     void insert(IndexData data) {
       _container.insert(data);
@@ -82,5 +149,6 @@ public:
 
 private:
     IndexContainer _container;
+    ScoreIndex::iterator _scoreIterator;
 };
 }

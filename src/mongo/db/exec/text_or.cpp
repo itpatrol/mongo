@@ -247,24 +247,20 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         //auto itFound = indexByRecordID.find(member->recordId);
         //LOG(3) << "Count " << indexByRecordID.count(member->recordId);
 
-        TextMapIndex::IndexData recordData = _dataIndexMap.find(member->recordId);
-        if(recordData.score > 0) {
-          recordData.score += documentTermScore;
-          recordData.scoreTerms[_currentChild] = documentTermScore;
-          LOG(3) << "Found in TextMapIndex" 
-                 << "recordID" << recordData.recordId 
-                 << "wsid" << recordData.wsid 
-                 << "score " << recordData.score;
-        } else {
+        TextMapIndex::RecordIndex::iterator itC = _dataIndexMap.findByID(member->recordId);
+        if(itC == _dataIndexMap.endRecords()) {
+          TextMapIndex::IndexData recordData;
           recordData.recordId = member->recordId;
           recordData.wsid = _currentWorkState.wsid;
           recordData.score = documentTermScore;
           recordData.scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
           recordData.scoreTerms[_currentChild] = documentTermScore;
-          LOG(3) << "Insert into TextMapIndex";
           _dataIndexMap.insert(recordData);
+          LOG(3) << "Insert into TextMapIndex " << member->recordId << " " << documentTermScore;
+        } else {
+          _dataIndexMap.update(itC, _currentChild, documentTermScore);
+          LOG(3) << "Update  TextMapIndex " << member->recordId << " " << documentTermScore;
         }
-
 
         DataMap::iterator it = _dataMap.find(member->recordId);
         // Found. Store extra.
@@ -327,6 +323,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         }
 
         _scoreIterator = _dataMap.begin();
+        _dataIndexMap.resetScopeIterator();
         // We need to sort _dataMap by score.
         _internalState = State::kReturningResults;
 
@@ -488,6 +485,7 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     LOG(3) << "stage returnResults";
     LOG(3) << "stage End" << _dataIndexMap.size();
 
+    
     if (_scoreIterator == _dataMap.end()) {
         
 
@@ -503,6 +501,16 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
         invariant(textRecordData.wsid == WorkingSet::INVALID_ID);
         return PlanStage::NEED_TIME;
     }
+
+    TextMapIndex::IndexData recordData = _dataIndexMap.nextScore();
+    LOG(3) << "Found in TextMapIndex" 
+            << "recordID" << recordData.recordId 
+            << "wsid" << recordData.wsid 
+            << "score " << recordData.score;
+    
+    LOG(3) << "Found in textRecordData" 
+            << "wsid" << textRecordData.wsid 
+            << "score " << textRecordData.score;
 
     WorkingSetMember* wsm = _ws->get(textRecordData.wsid);
     // Populate the working set member with the text score and return it.
