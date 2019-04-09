@@ -76,14 +76,29 @@ public:
 
     RecordIndex::iterator findByID(const RecordId& recordId) {
       return boost::multi_index::get<Records>(_container).find(recordId);
-    }
+    };
 
+    ScoreIndex::iterator scoreIterator(){
+      return _scoreIterator;
+    };
+
+    ScoreIndex::iterator endScore() {
+      return boost::multi_index::get<Score>(_container).end();
+    };
+
+    bool isScoreEmpty() {
+      if(boost::multi_index::get<Score>(_container).end() == boost::multi_index::get<Score>(_container).begin()) {
+        return false;
+      }
+      return true;
+    };
+    
     RecordIndex::iterator endRecords() {
       return boost::multi_index::get<Records>(_container).end();
-    }
+    };
 
-    struct updateIndex {
-      updateIndex(size_t termID, double newScore):termID(termID), newScore(newScore){}
+    struct updateScore {
+      updateScore(size_t termID, double newScore):termID(termID), newScore(newScore){}
 
       void operator()(IndexData& record)
       {
@@ -91,14 +106,30 @@ public:
         record.scoreTerms[termID] = newScore;
       }
 
-    private:
-      size_t termID;
-      double newScore;
+      private:
+        size_t termID;
+        double newScore;
+    };
+
+    struct trueAdvance {
+      trueAdvance(bool advanced):advanced(advanced){}
+
+      void operator()(IndexData& record)
+      {
+        record.advanced = advanced;
+      }
+      private:
+        bool advanced;
     };
 
     void update(RecordIndex::iterator it, size_t termID, double newScore) {
-      _container.modify(it, updateIndex(termID, newScore));
-    }
+      _container.modify(it, updateScore(termID, newScore));
+    };
+
+    void setAdvanced(const RecordId& recordId) {
+      RecordIndex::iterator it = findByID(recordId);
+      _container.modify(it, trueAdvance(true));
+    };
 
     //bool updateScore()
 
@@ -119,6 +150,12 @@ public:
       _scoreIterator = boost::multi_index::get<Score>(_container).begin();
     }
 
+    IndexData getScore(){
+      if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
+        return IndexData();
+      }
+      return *_scoreIterator;
+    }
     IndexData nextScore(){
       ++_scoreIterator;
       if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {

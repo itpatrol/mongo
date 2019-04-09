@@ -107,10 +107,10 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 
     switch (_internalState) {
         case State::kReadingTerms:
-            /*stageState = returnReadyResults(out);
+            stageState = returnReadyResults(out);
             if(stageState != PlanStage::IS_EOF) {
                 return stageState;
-            }*/
+            }
             stageState = readFromChildren(out);
             break;
         case State::kReturningResults:
@@ -371,6 +371,37 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
 }
 PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     LOG(3) << "stage returnReadyResults";
+    _dataIndexMap.resetScopeIterator();
+
+    if(_dataIndexMap.size() < 2) {
+      return PlanStage::IS_EOF;
+    }
+
+    TextMapIndex::IndexData recordData = _dataIndexMap.getScore();
+    LOG(3) << "Found in TextMapIndex" 
+            << "recordID" << recordData.recordId 
+            << "wsid" << recordData.wsid 
+            << "score " << recordData.score;
+    
+    // Search for first not sent
+    while(true == recordData.advanced) {
+      recordData = _dataIndexMap.nextScore();
+      LOG(3) << "Found in TextMapIndex" 
+            << "recordID" << recordData.recordId 
+            << "wsid" << recordData.wsid 
+            << "score " << recordData.score;
+    }
+
+
+    TextMapIndex::IndexData nextRecordData = _dataIndexMap.nextScore();
+
+    LOG(3) << "Found in TextMapIndex::nextRecordData" 
+            << "recordID" << nextRecordData.recordId 
+            << "wsid" << nextRecordData.wsid 
+            << "score " << nextRecordData.score;
+
+    _dataIndexMap.setAdvanced(recordData.recordId );
+    return PlanStage::IS_EOF;
     // If we already in kReturningResults, pass request there.
     if(_internalState == State::kReturningResults) {
       return PlanStage::IS_EOF;
