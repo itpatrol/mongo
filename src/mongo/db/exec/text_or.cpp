@@ -371,6 +371,12 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
 }
 PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     LOG(3) << "stage returnReadyResults";
+
+    // If we already in kReturningResults, pass request there.
+    if(_internalState == State::kReturningResults) {
+      return PlanStage::IS_EOF;
+    }
+
     _dataIndexMap.resetScopeIterator();
 
     if(_dataIndexMap.size() < 2) {
@@ -385,27 +391,42 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     
     // Search for first not sent
     while(true == recordData.advanced) {
+      if(_dataIndexMap.isScoreEmpty()) {
+        LOG(3) << "Reach end of score index "; 
+        return PlanStage::IS_EOF;
+      }
       recordData = _dataIndexMap.nextScore();
-      LOG(3) << "Found in TextMapIndex" 
-            << "recordID" << recordData.recordId 
-            << "wsid" << recordData.wsid 
-            << "score " << recordData.score;
+      LOG(3) << "Found in TextMapIndex " 
+            << " recordID " << recordData.recordId 
+            << " wsid " << recordData.wsid 
+            << " score " << recordData.score;
+
+      for (size_t i = 0; i < recordData.scoreTerms.size(); ++i) {
+          LOG(3) << "term " << i << " " << recordData.scoreTerms[i];
+      }
+    }
+
+    if(_dataIndexMap.isScoreEmpty()) {
+      LOG(3) << "Reach end of score index "; 
+      return PlanStage::IS_EOF;
     }
 
 
     TextMapIndex::IndexData nextRecordData = _dataIndexMap.nextScore();
 
-    LOG(3) << "Found in TextMapIndex::nextRecordData" 
-            << "recordID" << nextRecordData.recordId 
-            << "wsid" << nextRecordData.wsid 
-            << "score " << nextRecordData.score;
+    LOG(3) << "Found in TextMapIndex::nextRecordData " 
+            << " recordID " << nextRecordData.recordId 
+            << " wsid " << nextRecordData.wsid 
+            << " score " << nextRecordData.score;
+      for (size_t i = 0; i < nextRecordData.scoreTerms.size(); ++i) {
+          LOG(3) << "term " << i << " " << nextRecordData.scoreTerms[i];
+      }
 
-    _dataIndexMap.setAdvanced(recordData.recordId );
-    return PlanStage::IS_EOF;
-    // If we already in kReturningResults, pass request there.
-    if(_internalState == State::kReturningResults) {
-      return PlanStage::IS_EOF;
-    }
+    //_dataIndexMap.setAdvanced(recordData.recordId );
+    //return PlanStage::IS_EOF;
+
+    /*
+    
 
     TextRecordData topFirst;
     TextRecordData topSecond;
@@ -443,6 +464,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         }
         ++_topScoreIterator;
     }
+    */
     double currentAllTermsScore = 0;
     for (size_t i = 0; i < _scoreStatus.size(); ++i) {
         currentAllTermsScore += _scoreStatus[i];
@@ -456,54 +478,35 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     }
 
 
-
-
-    LOG(3) << "topFirst " << topFirst.wsid 
-             << " ID " << firstRecordID
-//             << " control " << topFirstCursor->first
-             << " score " << topFirst.score;
-    for (size_t i = 0; i < topFirst.scoreTerms.size(); ++i) {
-        LOG(3) << "term " << i << " " << topFirst.scoreTerms[i];
-    }
-
-    LOG(3) << "topSecond " << topSecond.wsid 
-             << " ID " << secondRecordID
-             << " score " << topSecond.score;
-    for (size_t i = 0; i < topSecond.scoreTerms.size(); ++i) {
-        LOG(3) << "term " << i << " " << topSecond.scoreTerms[i];
-    }
-
-    if( 0 == topFirst.score) {
+    if( 0 == recordData.score) {
       return PlanStage::IS_EOF;
     }
     
-    if(topFirst.score > topSecond.score) {
-      double totalScoreDiff = topFirst.score - topSecond.score;
+    if(recordData.score > nextRecordData.score) {
+      double totalScoreDiff = recordData.score - nextRecordData.score;
       double expectedMaxScoreForSecond = 0;
-      for (size_t i = 0; i < topSecond.scoreTerms.size(); ++i) {
-        if(0 == topSecond.scoreTerms[i])  {
+      for (size_t i = 0; i < nextRecordData.scoreTerms.size(); ++i) {
+        if(0 == nextRecordData.scoreTerms[i])  {
           expectedMaxScoreForSecond += _scoreStatus[i];
         }
       }
       LOG(3) << "totalScoreDiff  " << totalScoreDiff
              << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
       if(totalScoreDiff > expectedMaxScoreForSecond) {
-        LOG(3) << "Advance " << topFirst.wsid 
-              << " ID " << firstRecordID
-              << " control " << topFirstCursor->first
-              << " score " << topFirst.score;
-
+        LOG(3) << "Advance " << recordData.wsid 
+              << " ID " << recordData.recordId
+              << " score " << recordData.score;
+        _dataIndexMap.setAdvanced(recordData.recordId );
         // topFirstCursor->second.advanced = true;
         //topFirst.advanced = true;
-        topFirstCursor->second.advanced = true;
-        WorkingSetMember* wsm = _ws->get(topFirst.wsid);
+        WorkingSetMember* wsm = _ws->get(recordData.wsid);
         // Populate the working set member with the text score and return it.
         if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
-            wsm->updateComputed(new TextScoreComputedData(topFirst.score));
+            wsm->updateComputed(new TextScoreComputedData(recordData.score));
         } else {
-            wsm->addComputed(new TextScoreComputedData(topFirst.score));
+            wsm->addComputed(new TextScoreComputedData(recordData.score));
         }
-        *out = topFirst.wsid;
+        *out = recordData.wsid;
         return PlanStage::ADVANCED;
       }
     }

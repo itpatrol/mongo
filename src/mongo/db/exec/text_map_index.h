@@ -87,10 +87,10 @@ public:
     };
 
     bool isScoreEmpty() {
-      if(boost::multi_index::get<Score>(_container).end() == boost::multi_index::get<Score>(_container).begin()) {
-        return false;
+      if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
+        return true;
       }
-      return true;
+      return false;
     };
     
     RecordIndex::iterator endRecords() {
