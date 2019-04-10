@@ -161,6 +161,7 @@ private:
 
     TextMapIndex _dataIndexMap;
 
+    TextMapIndex::ScoreIndex::iterator _tmiScoreIterator;
     //TextMapIndex::const_iterator _scoreIndexMapIterator;
 
     // _dataMap is filled out by the first child and probed by subsequent children.  This is the

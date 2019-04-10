@@ -69,6 +69,8 @@ TextOrStage::TextOrStage(OperationContext* opCtx,
       _scoreStatus(0),
       _wantTextScore(wantTextScore) {
     _specificStats.wantTextScore = _wantTextScore;
+    //_tmiScoreIterator = _dataIndexMap.beginScore();
+    _dataIndexMap.resetScopeIterator();
 }
 
 void TextOrStage::addChild(PlanStage* child) {
@@ -323,7 +325,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         }
 
         _scoreIterator = _dataMap.begin();
-        _dataIndexMap.resetScopeIterator();
+        //_dataIndexMap.resetScopeIterator();
         // We need to sort _dataMap by score.
         _internalState = State::kReturningResults;
 
@@ -380,91 +382,42 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     _dataIndexMap.resetScopeIterator();
 
     if(_dataIndexMap.size() < 2) {
+      LOG(3) << "_dataIndexMap size" <<  _dataIndexMap.size() ;
       return PlanStage::IS_EOF;
     }
-
+    if(_dataIndexMap.isScoreEmpty()) {
+      LOG(3) << "_dataIndexMap isScoreEmpty" <<  _dataIndexMap.size() ;
+      return PlanStage::IS_EOF;
+    }
+    
     TextMapIndex::IndexData recordData = _dataIndexMap.getScore();
     LOG(3) << "Found in TextMapIndex" 
-            << "recordID" << recordData.recordId 
-            << "wsid" << recordData.wsid 
-            << "score " << recordData.score;
-    
-    // Search for first not sent
-    while(true == recordData.advanced) {
-      if(_dataIndexMap.isScoreEmpty()) {
-        LOG(3) << "Reach end of score index "; 
-        return PlanStage::IS_EOF;
-      }
-      recordData = _dataIndexMap.nextScore();
-      LOG(3) << "Found in TextMapIndex " 
-            << " recordID " << recordData.recordId 
-            << " wsid " << recordData.wsid 
-            << " score " << recordData.score;
-
+            << "\nrecordID" << recordData.recordId 
+            << "\nwsid" << recordData.wsid 
+            << "\nscore " << recordData.score;
       for (size_t i = 0; i < recordData.scoreTerms.size(); ++i) {
-          LOG(3) << "term " << i << " " << recordData.scoreTerms[i];
+          LOG(3) << "\nterm " << i << " " << recordData.scoreTerms[i];
       }
-    }
-
-    if(_dataIndexMap.isScoreEmpty()) {
-      LOG(3) << "Reach end of score index "; 
+    if( 0 == recordData.score) {
       return PlanStage::IS_EOF;
     }
-
-
-    TextMapIndex::IndexData nextRecordData = _dataIndexMap.nextScore();
+    
+    _dataIndexMap.scoreStepForward();
+    if(_dataIndexMap.isScoreEmpty()) {
+      _dataIndexMap.scoreStepBack();
+      LOG(3) << "_dataIndexMap isScoreEmpty" <<  _dataIndexMap.size() ;
+      return PlanStage::IS_EOF;
+    }
+    TextMapIndex::IndexData nextRecordData = _dataIndexMap.getScore();
 
     LOG(3) << "Found in TextMapIndex::nextRecordData " 
-            << " recordID " << nextRecordData.recordId 
-            << " wsid " << nextRecordData.wsid 
-            << " score " << nextRecordData.score;
+            << "\n recordID " << nextRecordData.recordId 
+            << "\n wsid " << nextRecordData.wsid 
+            << "\n score " << nextRecordData.score;
       for (size_t i = 0; i < nextRecordData.scoreTerms.size(); ++i) {
-          LOG(3) << "term " << i << " " << nextRecordData.scoreTerms[i];
+          LOG(3) << "\nterm " << i << " " << nextRecordData.scoreTerms[i];
       }
 
-    //_dataIndexMap.setAdvanced(recordData.recordId );
-    //return PlanStage::IS_EOF;
-
-    /*
-    
-
-    TextRecordData topFirst;
-    TextRecordData topSecond;
-    TextRecordData currentRecord;
-    mongo::RecordId firstRecordID;
-    mongo::RecordId secondRecordID;
-    DataMap::iterator topFirstCursor;
-    DataMap::iterator topSecondCursor;
-    DataMap::iterator _topScoreIterator = _dataMap.begin();
-
-    while(_topScoreIterator != _dataMap.end()) {
-        currentRecord = _topScoreIterator->second;
-        // If already processed - skip it.
-        if(currentRecord.advanced) {
-            ++_topScoreIterator;
-            continue;
-        }
-        if(currentRecord.collected) {
-          LOG(3) << "collected found " << currentRecord.score; 
-          if(currentRecord.score > topFirst.score) {
-            //secondRecordID = firstRecordID;
-            firstRecordID = _topScoreIterator->first;
-            topFirstCursor = _topScoreIterator;
-            //topSecond = topFirst;
-            topFirst = currentRecord;
-          }
-        } else {
-          if(currentRecord.score > topSecond.score) {
-            //secondRecordID = firstRecordID;
-            secondRecordID = _topScoreIterator->first;
-            topSecondCursor = _topScoreIterator;
-            //topSecond = topFirst;
-            topSecond = currentRecord;
-          }
-        }
-        ++_topScoreIterator;
-    }
-    */
     double currentAllTermsScore = 0;
     for (size_t i = 0; i < _scoreStatus.size(); ++i) {
         currentAllTermsScore += _scoreStatus[i];
@@ -474,11 +427,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
 
 
     if(0 == currentAllTermsScore) {
-      return PlanStage::IS_EOF;
-    }
-
-
-    if( 0 == recordData.score) {
+      _dataIndexMap.scoreStepBack();
       return PlanStage::IS_EOF;
     }
     
@@ -497,8 +446,6 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
               << " ID " << recordData.recordId
               << " score " << recordData.score;
         _dataIndexMap.setAdvanced(recordData.recordId );
-        // topFirstCursor->second.advanced = true;
-        //topFirst.advanced = true;
         WorkingSetMember* wsm = _ws->get(recordData.wsid);
         // Populate the working set member with the text score and return it.
         if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
@@ -508,6 +455,8 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         }
         *out = recordData.wsid;
         return PlanStage::ADVANCED;
+      } else {
+        _dataIndexMap.scoreStepBack();
       }
     }
 
@@ -519,32 +468,18 @@ PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
     LOG(3) << "stage returnResults";
     LOG(3) << "stage End" << _dataIndexMap.size();
 
-    
-    if (_scoreIterator == _dataMap.end()) {
-        
-
-        _internalState = State::kDone;
-        return PlanStage::IS_EOF;
+    if(_dataIndexMap.isScoreEmpty()) {
+      _internalState = State::kDone;
+      return PlanStage::IS_EOF;
     }
 
-    // Retrieve the record that contains the text score.
-    TextRecordData textRecordData = _scoreIterator->second;
-    ++_scoreIterator;
-    // Ignore non-matched documents.
-    if (textRecordData.score < 0) {
-        invariant(textRecordData.wsid == WorkingSet::INVALID_ID);
-        return PlanStage::NEED_TIME;
+    TextMapIndex::IndexData textRecordData = _dataIndexMap.getScore();
+    if(textRecordData.advanced) {
+      // We reach to the list of advanced one
+      _internalState = State::kDone;
+      return PlanStage::IS_EOF;
     }
-
-    TextMapIndex::IndexData recordData = _dataIndexMap.nextScore();
-    LOG(3) << "Found in TextMapIndex" 
-            << "recordID" << recordData.recordId 
-            << "wsid" << recordData.wsid 
-            << "score " << recordData.score;
-    
-    LOG(3) << "Found in textRecordData" 
-            << "wsid" << textRecordData.wsid 
-            << "score " << textRecordData.score;
+    _dataIndexMap.scoreStepForward();
 
     WorkingSetMember* wsm = _ws->get(textRecordData.wsid);
     // Populate the working set member with the text score and return it.

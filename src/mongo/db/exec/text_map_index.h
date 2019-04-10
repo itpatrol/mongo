@@ -5,6 +5,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/member.hpp>
+#include <boost/multi_index/mem_fun.hpp>
 #include <boost/multi_index/tag.hpp>
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
@@ -26,7 +27,8 @@ using boost::multi_index::member;
 using boost::multi_index::tag;
 using boost::multi_index::indexed_by;
 using boost::multi_index::ordered_non_unique;
-
+using boost::multi_index::const_mem_fun;
+using std::vector;
 
 class TextMapIndex {
 
@@ -39,10 +41,25 @@ public:
       bool advanced;
       std::vector<double> scoreTerms;
       bool collected;
+      double scoreSort()const {
+        if(advanced) {
+          return 0;
+        }
+        return score;
+      }
 
     };
     struct Records {};
     struct Score {};
+    // Using custom sor by pushing all advanced records to the bottom.
+    /*struct ScoreSort {
+      bool operator() (IndexData& x, IndexData& y) const {
+        if(x.advanced) {
+          return false
+        }
+        return x.score > y.score;
+      }
+    };*/
 
     using IndexContainer = 
       multi_index_container<
@@ -55,7 +72,7 @@ public:
           >,
           ordered_non_unique<  //ordered index over 'i1'
             tag<Score>, // give that index a name
-            member<IndexData, double, &IndexData::score>,
+            const_mem_fun<IndexData, double, &IndexData::scoreSort>,
             std::greater<double> // what will be the index's key
           >
       >
@@ -84,6 +101,9 @@ public:
 
     ScoreIndex::iterator endScore() {
       return boost::multi_index::get<Score>(_container).end();
+    };
+    ScoreIndex::iterator beginScore() {
+      return boost::multi_index::get<Score>(_container).begin();
     };
 
     bool isScoreEmpty() {
@@ -151,11 +171,31 @@ public:
     }
 
     IndexData getScore(){
-      if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
-        return IndexData();
-      }
       return *_scoreIterator;
     }
+/*
+    std::vector<IndexData> getScorePair(){
+      std::vector<IndexData> scorePair = std::vector<IndexData>(0);
+      if(_scoreIterator != boost::multi_index::get<Score>(_container).end()) {
+        scorePair.push_back(*_scoreIterator);
+        ++_scoreIterator;
+        if(_scoreIterator != boost::multi_index::get<Score>(_container).end()) {
+          scorePair.push_back(*_scoreIterator);
+        } else {
+          --_scoreIterator;
+        }
+      }
+      return scorePair;
+    }
+*/
+    void scoreStepBack(){
+      --_scoreIterator;
+    }
+    void scoreStepForward(){
+      ++_scoreIterator;
+    }
+    
+
     IndexData nextScore(){
       ++_scoreIterator;
       if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
@@ -174,6 +214,10 @@ public:
 
     void insert(IndexData data) {
       _container.insert(data);
+      if(1 == _container.size()) {
+        // Force to set to beggining on first record;
+        _scoreIterator = boost::multi_index::get<Score>(_container).begin();
+      }
     }
 
     /**
