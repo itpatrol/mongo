@@ -193,6 +193,10 @@ private:
     // True if we dedup on RecordId, false otherwise.
     bool _wantTextScore;
 
+    // Traking latest missing diff from PredictScore
+    double _predictScoreDiff = 0 ;
+    double _predictScoreStatBase = 0 ;
+
     // Stats
     TextOrStats _specificStats;
 };

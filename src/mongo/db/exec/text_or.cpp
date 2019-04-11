@@ -396,6 +396,29 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
       LOG(3) << "_dataIndexMap isScoreEmpty" <<  _dataIndexMap.size() ;
       return PlanStage::IS_EOF;
     }
+
+      
+    double currentAllTermsScore = 0;
+    for (size_t i = 0; i < _scoreStatus.size(); ++i) {
+        currentAllTermsScore += _scoreStatus[i];
+        LOG(3) << "currentTermScore " << i << " " << _scoreStatus[i];
+    }
+    LOG(3) << "currentAllTermsScore " << currentAllTermsScore ;
+    if(0 == currentAllTermsScore) {
+      //_dataIndexMap.scoreStepBack();
+      return PlanStage::IS_EOF;
+    }
+
+    if(_predictScoreStatBase > 0 && _predictScoreDiff > 0) {
+      if( _predictScoreStatBase - currentAllTermsScore < _predictScoreDiff) {
+        LOG(2) << "_predictScoreStatBase " << _predictScoreStatBase
+          << " _predictScoreDiff " << _predictScoreDiff
+          << " currentAllTermsScore " << currentAllTermsScore
+          << " current Diff " << (_predictScoreStatBase - currentAllTermsScore);
+        //We still did not overcome a diff
+        return PlanStage::IS_EOF;
+      }
+    } 
     
     TextMapIndex::IndexData recordData = _dataIndexMap.getScore();
     LOG(3) << "Found in TextMapIndex" 
@@ -417,23 +440,15 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
       LOG(3) << "_dataIndexMap isScoreEmpty" <<  _dataIndexMap.size() ;
       return PlanStage::IS_EOF;
     }
-    
-    double currentAllTermsScore = 0;
-    for (size_t i = 0; i < _scoreStatus.size(); ++i) {
-        currentAllTermsScore += _scoreStatus[i];
-        LOG(3) << "currentTermScore " << i << " " << _scoreStatus[i];
-    }
-    LOG(3) << "currentAllTermsScore " << currentAllTermsScore ;
-    if(0 == currentAllTermsScore) {
-      //_dataIndexMap.scoreStepBack();
-      return PlanStage::IS_EOF;
-    }
+  
 
     // Check if it is still possible to receive record that matcha ll terms and score better.
     if(recordData.score < currentAllTermsScore) {
       LOG(3) << "Possible max score record  " << currentAllTermsScore;
       return PlanStage::IS_EOF;
     }
+
+    LOG(2) << "Currend Diff   " << recordData.score - currentAllTermsScore;
     
 
   // Count how many records with predict score > that currentAllTermsScore;
@@ -471,6 +486,8 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         LOG(2) << "totalScoreDiff  " << totalScoreDiff
              << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
         LOG(2) << "ScorePredict Count " << predictCount << " max " <<  _dataIndexMap.size() ;
+        _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff; 
+        _predictScoreStatBase = currentAllTermsScore;
         return PlanStage::IS_EOF;
       }
       
