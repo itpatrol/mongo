@@ -1,5 +1,7 @@
 #pragma once
 
+//#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
+
 #include "mongo/platform/basic.h"
 
 #include <boost/intrusive_ptr.hpp>
@@ -43,32 +45,11 @@ public:
       std::vector<double> scoreTerms;
       std::vector<double> scorePredictTerms;
       bool collected;
-      double scoreSort()const {
-        if(advanced) {
-          return 0;
-        }
-        return score;
-      }
-      double scorePredictSort()const {
-        if(advanced) {
-          return 0;
-        }
-        return predictScore;
-      }
 
     };
     struct Records {};
     struct Score {};
     struct ScorePredict {};
-    // Using custom sor by pushing all advanced records to the bottom.
-    /*struct ScoreSort {
-      bool operator() (IndexData& x, IndexData& y) const {
-        if(x.advanced) {
-          return false
-        }
-        return x.score > y.score;
-      }
-    };*/
 
     using IndexContainer = 
       multi_index_container<
@@ -81,12 +62,12 @@ public:
           >,
           ordered_non_unique<  //ordered index over 'i1'
             tag<Score>, // give that index a name
-            const_mem_fun<IndexData, double, &IndexData::scoreSort>,
+            member<IndexData, double, &IndexData::score>,
             std::greater<double> // what will be the index's key
           >,
           ordered_non_unique<  //ordered index over 'i1'
             tag<ScorePredict>, // give that index a name
-            const_mem_fun<IndexData, double, &IndexData::scorePredictSort>,
+            member<IndexData, double, &IndexData::predictScore>,
             std::greater<double> // what will be the index's key
           >
       >
@@ -95,16 +76,6 @@ public:
     typedef IndexContainer::index<Score>::type ScoreIndex;
     typedef IndexContainer::index<ScorePredict>::type ScorePredictIndex;
     typedef IndexContainer::index<Records>::type RecordIndex;
-
-    //TextMapIndex::const_iterator = IndexContainer::nth_index<1>::type::iterator;
-
-   /* RecordIndex::iterator findByID(const RecordId& recordId) {
-      auto it = boost::multi_index::get<Records>(_container).find(recordId);
-      if (it != boost::multi_index::get<Records>(_container).end()) {
-        return it;
-      }
-      return void;
-    }*/
 
     RecordIndex::iterator findByID(const RecordId& recordId) {
       return boost::multi_index::get<Records>(_container).find(recordId);
@@ -146,6 +117,14 @@ public:
 
       void operator()(IndexData& record)
       {
+        //std::cout << "\nupdateScore " << record.score << " predict " << record.predictScore
+        //  << " recordID" << record.recordId;
+        if(record.advanced) {
+          record.scoreTerms[termID] = newScore;
+          record.predictScore = 0;
+          record.score = 0;
+          return;
+        }
         record.score += newScore;
         record.scoreTerms[termID] = newScore;
         record.predictScore = 0;
@@ -171,34 +150,23 @@ public:
       void operator()(IndexData& record)
       {
         record.advanced = advanced;
+        record.predictScore = 0;
+        record.score = 0;
       }
       private:
         bool advanced;
     };
 
     void update(RecordIndex::iterator it, size_t termID, double newScore, std::vector<double> scoreStatus) {
+      //std::cout << "\n update " << termID << " score " << newScore;
       _container.modify(it, updateScore(termID, newScore, scoreStatus));
     };
 
     void setAdvanced(const RecordId& recordId) {
       RecordIndex::iterator it = findByID(recordId);
+      //std::cout << "\n set advanced  recordId " << recordId;
       _container.modify(it, trueAdvance(true));
     };
-
-    //bool updateScore()
-
-    /*bool setByID(RecordId recordId, WorkingSetID wsid, double score, std::vector<double> scoreTerms) {
-      auto it = boost::multi_index::get<Records>(_container).find(recordId);
-      if (it != boost::multi_index::get<Records>(_container).end()) {
-        IndexData currentRecord = *it;
-      }
-      IndexData newRecord;
-      recordData.recordId = member->recordId;
-      recordData.wsid = _currentWorkState.wsid;
-      recordData.score = score;
-      recordData.scoreTerms = scoreTerms;
-      recordData.scoreTerms[_currentChild] = documentTermScore;
-    }*/
 
     void resetScopeIterator() {
       _scoreIterator = boost::multi_index::get<Score>(_container).begin();
@@ -207,21 +175,7 @@ public:
     IndexData getScore(){
       return *_scoreIterator;
     }
-/*
-    std::vector<IndexData> getScorePair(){
-      std::vector<IndexData> scorePair = std::vector<IndexData>(0);
-      if(_scoreIterator != boost::multi_index::get<Score>(_container).end()) {
-        scorePair.push_back(*_scoreIterator);
-        ++_scoreIterator;
-        if(_scoreIterator != boost::multi_index::get<Score>(_container).end()) {
-          scorePair.push_back(*_scoreIterator);
-        } else {
-          --_scoreIterator;
-        }
-      }
-      return scorePair;
-    }
-*/
+
     void scoreStepBack(){
       --_scoreIterator;
     }
@@ -238,15 +192,8 @@ public:
       return *_scoreIterator;
     }
 
-    /*auto findByScoreAll() {
-      auto it = boost::multi_index::get<Score>(_container).begin();
-      if (it != boost::multi_index::get<Score>(_container).end()) {
-        return it;
-      }
-      return nullptr;
-    }*/
-
     void insert(IndexData data) {
+      //std::cout << "\n insert " << data.recordId << " score " << data.score;
       _container.insert(data);
       if(1 == _container.size()) {
         // Force to set to beggining on first record;

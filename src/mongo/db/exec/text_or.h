@@ -189,6 +189,7 @@ private:
 
     // Collect latest document score per child
     std::vector<double> _scoreStatus;
+    double currentAllTermsScore =0;
 
     // True if we dedup on RecordId, false otherwise.
     bool _wantTextScore;
