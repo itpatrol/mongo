@@ -38,8 +38,10 @@ public:
       RecordId recordId;
       WorkingSetID wsid;
       double score;
+      double predictScore;
       bool advanced;
       std::vector<double> scoreTerms;
+      std::vector<double> scorePredictTerms;
       bool collected;
       double scoreSort()const {
         if(advanced) {
@@ -47,10 +49,17 @@ public:
         }
         return score;
       }
+      double scorePredictSort()const {
+        if(advanced) {
+          return 0;
+        }
+        return predictScore;
+      }
 
     };
     struct Records {};
     struct Score {};
+    struct ScorePredict {};
     // Using custom sor by pushing all advanced records to the bottom.
     /*struct ScoreSort {
       bool operator() (IndexData& x, IndexData& y) const {
@@ -74,11 +83,17 @@ public:
             tag<Score>, // give that index a name
             const_mem_fun<IndexData, double, &IndexData::scoreSort>,
             std::greater<double> // what will be the index's key
+          >,
+          ordered_non_unique<  //ordered index over 'i1'
+            tag<ScorePredict>, // give that index a name
+            const_mem_fun<IndexData, double, &IndexData::scorePredictSort>,
+            std::greater<double> // what will be the index's key
           >
       >
     >;
 
     typedef IndexContainer::index<Score>::type ScoreIndex;
+    typedef IndexContainer::index<ScorePredict>::type ScorePredictIndex;
     typedef IndexContainer::index<Records>::type RecordIndex;
 
     //TextMapIndex::const_iterator = IndexContainer::nth_index<1>::type::iterator;
@@ -106,6 +121,13 @@ public:
       return boost::multi_index::get<Score>(_container).begin();
     };
 
+    ScorePredictIndex::iterator beginScorePredict() {
+      return boost::multi_index::get<ScorePredict>(_container).begin();
+    };
+    ScorePredictIndex::iterator endScorePredict() {
+      return boost::multi_index::get<ScorePredict>(_container).end();
+    };
+
     bool isScoreEmpty() {
       if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
         return true;
@@ -118,17 +140,29 @@ public:
     };
 
     struct updateScore {
-      updateScore(size_t termID, double newScore):termID(termID), newScore(newScore){}
+      updateScore(size_t termID, double newScore, std::vector<double> scoreStatus):termID(termID), newScore(newScore){
+        _scoreStatus = scoreStatus;
+      }
 
       void operator()(IndexData& record)
       {
         record.score += newScore;
         record.scoreTerms[termID] = newScore;
+        record.predictScore = 0;
+        for (size_t i = 0; i < record.scorePredictTerms.size(); ++i) {
+          if(0 == record.scoreTerms[i]) {
+            record.scorePredictTerms[i] = _scoreStatus[i];
+          } else {
+            record.scorePredictTerms[i] = record.scoreTerms[i];
+          }
+          record.predictScore += record.scorePredictTerms[i];
+        }
       }
 
       private:
         size_t termID;
         double newScore;
+        std::vector<double> _scoreStatus;
     };
 
     struct trueAdvance {
@@ -142,8 +176,8 @@ public:
         bool advanced;
     };
 
-    void update(RecordIndex::iterator it, size_t termID, double newScore) {
-      _container.modify(it, updateScore(termID, newScore));
+    void update(RecordIndex::iterator it, size_t termID, double newScore, std::vector<double> scoreStatus) {
+      _container.modify(it, updateScore(termID, newScore, scoreStatus));
     };
 
     void setAdvanced(const RecordId& recordId) {
