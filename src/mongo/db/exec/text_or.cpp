@@ -109,10 +109,10 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 
     switch (_internalState) {
         case State::kReadingTerms:
-            /*stageState = returnReadyResults(out);
+            stageState = returnReadyResults(out);
             if(stageState != PlanStage::IS_EOF) {
                 return stageState;
-            }*/
+            }
             stageState = readFromChildren(out);
             break;
         case State::kReturningResults:
@@ -452,7 +452,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         break;
       }
 
-      /*LOG(3) << "Found in TextMapIndex::predictRecordData " 
+      LOG(3) << "Found in TextMapIndex::predictRecordData " 
               << "| recordID " << predictRecordData.recordId 
               << "| wsid " << predictRecordData.wsid 
               << "| score " << predictRecordData.score
@@ -460,7 +460,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
               << "| advanced " << predictRecordData.advanced;
         for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
             LOG(3) << "| term " << i << " " << predictRecordData.scoreTerms[i];
-        }*/
+        }
       // Check if breaking
       double totalScoreDiff = recordData.score - predictRecordData.score;
       double expectedMaxScoreForSecond = 0;
@@ -479,6 +479,15 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff; 
         _predictScoreStatBase = currentAllTermsScore;
         return PlanStage::IS_EOF;
+      } else {
+        LOG(3) << "Skipping due to smaller actual";
+        LOG(3) << "totalScoreDiff  " << totalScoreDiff
+             << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
+        // Recalculate it.
+        ++itScorePredict;
+        _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
+        --itScorePredict;
+
       }
       
       if(itScorePredict == _dataIndexMap.endScorePredict()){

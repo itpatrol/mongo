@@ -110,6 +110,35 @@ public:
       return boost::multi_index::get<Records>(_container).end();
     };
 
+    struct refreshScoreAction{
+      refreshScoreAction(std::vector<double> scoreStatus) {
+        _scoreStatus = scoreStatus;
+      }
+
+      void operator()(IndexData& record)
+      {
+
+        record.score = 0;
+        record.predictScore = 0;
+        if(record.advanced) {
+          return;
+        }
+        
+        for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
+          record.score += record.scoreTerms[i];
+          if(0 == record.scoreTerms[i]) {
+            record.scorePredictTerms[i] = _scoreStatus[i];
+          } else {
+            record.scorePredictTerms[i] = record.scoreTerms[i];
+          }
+          record.predictScore += record.scorePredictTerms[i];
+        }
+      }
+
+      private:
+        std::vector<double> _scoreStatus;
+    };
+
     struct updateScore {
       updateScore(size_t termID, double newScore, std::vector<double> scoreStatus):termID(termID), newScore(newScore){
         _scoreStatus = scoreStatus;
@@ -160,6 +189,11 @@ public:
     void update(RecordIndex::iterator it, size_t termID, double newScore, std::vector<double> scoreStatus) {
       //std::cout << "\n update " << termID << " score " << newScore;
       _container.modify(it, updateScore(termID, newScore, scoreStatus));
+    };
+
+    void refreshScore(const RecordId& recordId, std::vector<double> scoreStatus) {
+      RecordIndex::iterator it = findByID(recordId);
+      _container.modify(it, refreshScoreAction(scoreStatus));
     };
 
     void setAdvanced(const RecordId& recordId) {
