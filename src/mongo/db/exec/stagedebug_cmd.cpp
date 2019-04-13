@@ -495,6 +495,7 @@ public:
             if (!params.query.parse(fam->getSpec().getTextIndexVersion()).isOK()) {
                 return NULL;
             }
+            params.query.setFreq(TextMatchExpressionBase::kfreqDefault);
 
             return new TextStage(opCtx, params, workingSet, matcher);
         } else if ("delete" == nodeName) {

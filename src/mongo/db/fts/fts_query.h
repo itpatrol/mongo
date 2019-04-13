@@ -60,6 +60,10 @@ public:
         _diacriticSensitive = diacriticSensitive;
     }
 
+    void setFreq(long long freq) {
+        _freq = freq;
+    }
+
     const std::string& getQuery() const {
         return _query;
     }
@@ -76,13 +80,18 @@ public:
         return _diacriticSensitive;
     }
 
+    long long getFreq() const {
+        return _freq;
+    }
+
     /**
      * Returns true iff '*this' and 'other' have the same unparsed form.
      */
     bool equivalent(const FTSQuery& other) const {
         return _query == other._query && _language == other._language &&
             _caseSensitive == other._caseSensitive &&
-            _diacriticSensitive == other._diacriticSensitive;
+            _diacriticSensitive == other._diacriticSensitive &&
+            _freq == other._freq;
     }
 
     /**
@@ -103,6 +112,7 @@ private:
     std::string _language;
     bool _caseSensitive = false;
     bool _diacriticSensitive = false;
+    long long _freq = 0;
 };
 
 }  // namespace fts

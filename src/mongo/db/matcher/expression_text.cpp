@@ -51,7 +51,8 @@ Status TextMatchExpression::init(OperationContext* opCtx,
     _ftsQuery.setLanguage(std::move(params.language));
     _ftsQuery.setCaseSensitive(params.caseSensitive);
     _ftsQuery.setDiacriticSensitive(params.diacriticSensitive);
-
+    _ftsQuery.setFreq(params.freq);
+    
     fts::TextIndexVersion version;
     {
         // Find text index.

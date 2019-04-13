@@ -41,6 +41,7 @@ Status TextNoOpMatchExpression::init(TextParams params) {
     _ftsQuery.setLanguage(std::move(params.language));
     _ftsQuery.setCaseSensitive(params.caseSensitive);
     _ftsQuery.setDiacriticSensitive(params.diacriticSensitive);
+    _ftsQuery.setFreq(params.freq);
     invariantOK(_ftsQuery.parse(fts::TEXT_INDEX_VERSION_INVALID));
     return setPath("_fts");
 }
@@ -51,6 +52,7 @@ std::unique_ptr<MatchExpression> TextNoOpMatchExpression::shallowClone() const {
     params.language = _ftsQuery.getLanguage();
     params.caseSensitive = _ftsQuery.getCaseSensitive();
     params.diacriticSensitive = _ftsQuery.getDiacriticSensitive();
+    params.freq = _ftsQuery.getFreq();
 
     auto expr = stdx::make_unique<TextNoOpMatchExpression>();
     invariantOK(expr->init(std::move(params)));

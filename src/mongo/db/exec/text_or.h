@@ -38,6 +38,7 @@
 
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/exec/text_map_index.h"
+#include "mongo/db/fts/fts_query_impl.h"
 #include "mongo/db/fts/fts_spec.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/record_id.h"
@@ -49,6 +50,7 @@
 namespace mongo {
 
 using fts::FTSSpec;
+using fts::FTSQueryImpl;
 
 /**
  * This stage outputs the union of its children.  It optionally deduplicates on RecordId.
@@ -74,6 +76,7 @@ public:
     };
     TextOrStage(OperationContext* opCtx,
                 WorkingSet* ws,
+                const FTSQueryImpl& query,
                 const FTSSpec& ftsSpec,
                 bool wantTextScore);
 
@@ -97,6 +100,7 @@ public:
 
     static const char* kStageType;
     static const size_t kChildIsEOF;
+    static const size_t kReleaseEachNum;
 
 private:
 
@@ -144,6 +148,8 @@ private:
     // Not owned by us.
     WorkingSet* _ws;
 
+    const FTSQueryImpl _query;
+
     // The index spec used to determine where to find the score.
     FTSSpec _ftsSpec;
 
@@ -181,12 +187,17 @@ private:
     // True if we dedup on RecordId, false otherwise.
     bool _wantTextScore;
 
+    //
+    long long releaseEachNum = 0;
+
     // Traking latest missing diff from PredictScore
     double _predictScoreDiff = 0 ;
     double _predictScoreStatBase = 0 ;
 
     // Stats
     TextOrStats _specificStats;
+
+    
 };
 
 }  // namespace mongo

@@ -91,6 +91,17 @@ ExtensionsCallback::extractTextMatchExpressionParams(BSONElement text) {
         expectedFieldCount++;
     }
 
+    Status freqStatus =
+        bsonExtractIntegerField(queryObj, "$freq", &params.freq);
+    if (freqStatus == ErrorCodes::TypeMismatch) {
+        return freqStatus;
+    } else if (freqStatus == ErrorCodes::NoSuchKey) {
+        params.freq = TextMatchExpressionBase::kfreqDefault;
+    } else {
+        invariantOK(freqStatus);
+        expectedFieldCount++;
+    }
+
     if (queryObj.nFields() != expectedFieldCount) {
         return {ErrorCodes::BadValue, "extra fields in $text"};
     }

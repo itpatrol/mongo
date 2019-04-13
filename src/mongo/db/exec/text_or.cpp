@@ -56,21 +56,26 @@ std::size_t hash_value(RecordId const& b){
 // static
 const char* TextOrStage::kStageType = "TEXT_OR";
 const size_t TextOrStage::kChildIsEOF = -1;
+const size_t TextOrStage::kReleaseEachNum = 1000;
 
 TextOrStage::TextOrStage(OperationContext* opCtx,
                          WorkingSet* ws,
+                         const FTSQueryImpl& query,
                          const FTSSpec& ftsSpec,
                          bool wantTextScore)
     : PlanStage(kStageType, opCtx),
       _ws(ws),
+      _query(query),
       _ftsSpec(ftsSpec),
       _currentChild(0),
       _indexerStatus(0),
       _scoreStatus(0),
       _wantTextScore(wantTextScore) {
+    LOG(2) << "Freq " << _query.getFreq() ;
     _specificStats.wantTextScore = _wantTextScore;
     //_tmiScoreIterator = _dataIndexMap.beginScore();
     _dataIndexMap.resetScopeIterator();
+
 }
 
 void TextOrStage::addChild(PlanStage* child) {
@@ -109,9 +114,12 @@ PlanStage::StageState TextOrStage::doWork(WorkingSetID* out) {
 
     switch (_internalState) {
         case State::kReadingTerms:
-            stageState = returnReadyResults(out);
-            if(stageState != PlanStage::IS_EOF) {
+            // It's for score releasing only.
+            if(_wantTextScore) {
+              stageState = returnReadyResults(out);
+              if(stageState != PlanStage::IS_EOF) {
                 return stageState;
+              }
             }
             stageState = readFromChildren(out);
             break;
@@ -279,8 +287,13 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         if(!isChildrenEOF()) {
           return PlanStage::NEED_TIME;
         }
-
+        LOG(3) << "Finished on ";
+        for (size_t i = 0; i < _scoreStatus.size(); ++i) {
+          LOG(3) << " " << i << " " << _scoreStatus[i];
+        }
+            
         if (!_wantTextScore) {
+            _internalState = State::kDone;
             return PlanStage::IS_EOF;
         }
 
@@ -335,6 +348,12 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     if(_internalState == State::kReturningResults) {
       return PlanStage::IS_EOF;
     }
+    if(releaseEachNum < _query.getFreq() ) {
+      LOG(2) << "Skip Releasing" <<  releaseEachNum << " " << _query.getFreq();
+      releaseEachNum++;
+      return PlanStage::IS_EOF;
+    }
+
 
     _dataIndexMap.resetScopeIterator();
 
@@ -360,6 +379,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
           << " currentAllTermsScore " << currentAllTermsScore
           << " current Diff " << (_predictScoreStatBase - currentAllTermsScore);
         //We still did not overcome a diff
+        releaseEachNum = 0;
         return PlanStage::IS_EOF;
       }
     } 
@@ -423,6 +443,7 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         LOG(3) << "ScorePredict Count " << predictCount << " max " <<  _dataIndexMap.size() ;
         _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff; 
         _predictScoreStatBase = currentAllTermsScore;
+        releaseEachNum = 0;
         return PlanStage::IS_EOF;
       } else {
         LOG(3) << "Skipping due to smaller actual";

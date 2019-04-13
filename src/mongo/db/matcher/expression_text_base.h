@@ -48,10 +48,12 @@ public:
         std::string language;
         bool caseSensitive;
         bool diacriticSensitive;
+        long long freq;
     };
 
     static const bool kCaseSensitiveDefault;
     static const bool kDiacriticSensitiveDefault;
+    static const long long kfreqDefault;
 
     TextMatchExpressionBase();
     virtual ~TextMatchExpressionBase() {}

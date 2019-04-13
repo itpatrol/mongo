@@ -38,6 +38,7 @@ namespace mongo {
 
 const bool TextMatchExpressionBase::kCaseSensitiveDefault = false;
 const bool TextMatchExpressionBase::kDiacriticSensitiveDefault = false;
+const long long TextMatchExpressionBase::kfreqDefault = 1000;
 
 TextMatchExpressionBase::TextMatchExpressionBase() : LeafMatchExpression(TEXT) {}
 
@@ -63,7 +64,9 @@ void TextMatchExpressionBase::serialize(BSONObjBuilder* out) const {
                                << "$caseSensitive"
                                << ftsQuery.getCaseSensitive()
                                << "$diacriticSensitive"
-                               << ftsQuery.getDiacriticSensitive()));
+                               << ftsQuery.getDiacriticSensitive()
+                               << "$freq"
+                               << ftsQuery.getFreq()));
 }
 
 bool TextMatchExpressionBase::equivalent(const MatchExpression* other) const {

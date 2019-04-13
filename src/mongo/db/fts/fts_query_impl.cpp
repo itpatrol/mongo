@@ -158,6 +158,7 @@ std::unique_ptr<FTSQuery> FTSQueryImpl::clone() const {
     clonedQuery->setLanguage(getLanguage());
     clonedQuery->setCaseSensitive(getCaseSensitive());
     clonedQuery->setDiacriticSensitive(getDiacriticSensitive());
+    clonedQuery->setFreq(getFreq());
     clonedQuery->_positiveTerms = _positiveTerms;
     clonedQuery->_negatedTerms = _negatedTerms;
     clonedQuery->_positivePhrases = _positivePhrases;
