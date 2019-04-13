@@ -133,6 +133,8 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
             static_cast<const TextScoreComputedData*>(member->getComputed(WSM_COMPUTED_TEXT_SCORE));
         currentAllTermsScore -= _scoreStatus[_currentChild];
         _scoreStatus[_currentChild] = score->getScore();
+        //_scoreStatus[_currentChild] = (int)(_scoreStatus[_currentChild] * 100);
+        //_scoreStatus[_currentChild] = (double)_scoreStatus[_currentChild] / 100;
         currentAllTermsScore += _scoreStatus[_currentChild];
         return _scoreStatus[_currentChild];
     }
@@ -146,6 +148,8 @@ double TextOrStage::getIndexScore(WorkingSetMember* member) {
     BSONElement scoreElement = keyIt.next();
     currentAllTermsScore -= _scoreStatus[_currentChild];
     _scoreStatus[_currentChild] = scoreElement.number();
+    //_scoreStatus[_currentChild] = (int)(_scoreStatus[_currentChild] * 100);
+    //_scoreStatus[_currentChild] = (double)_scoreStatus[_currentChild] / 100;
     currentAllTermsScore += _scoreStatus[_currentChild];
     return _scoreStatus[_currentChild];
 }
@@ -223,35 +227,22 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         }
         ++_specificStats.dupsTested;
         if (!_wantTextScore) {
-            if (_dataMap.end() != _dataMap.find(member->recordId)) {
+            TextMapIndex::RecordIndex::iterator itC = _dataIndexMap.findByID(member->recordId);
+            if(itC != _dataIndexMap.endRecords()) {
                 ++_specificStats.dupsDropped;
                 _ws->free(_currentWorkState.wsid);
                 return PlanStage::NEED_TIME;
-            } else {
-                TextRecordData textRecordData;
-                textRecordData.wsid = _currentWorkState.wsid;
-                if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
-                    // Didn't insert because we already had this RecordId inside the map. This
-                    // should only
-                    // happen if we're seeing a newer copy of the same doc in a more recent
-                    // snapshot.
-                    // Throw out the newer copy of the doc.
-                    _ws->free(_currentWorkState.wsid);
-                    return PlanStage::NEED_TIME;
-                }
-                *out = _currentWorkState.wsid;
-                return PlanStage::ADVANCED;
             }
+            TextMapIndex::IndexData recordData;
+            recordData.recordId = member->recordId;
+            recordData.wsid = _currentWorkState.wsid;
+            _dataIndexMap.insert(recordData);
+            LOG(3) << "stage ADVANCE";
+            *out = _currentWorkState.wsid;
+            return PlanStage::ADVANCED;
         }
 
-        
-        //auto& indexByRecordID = _dataIndexMap.get<IndexByRecordId>();
-        
-
         double documentTermScore = getIndexScore(member);
-
-        //auto itFound = indexByRecordID.find(member->recordId);
-        //LOG(3) << "Count " << indexByRecordID.count(member->recordId);
 
         TextMapIndex::RecordIndex::iterator itC = _dataIndexMap.findByID(member->recordId);
         if(itC == _dataIndexMap.endRecords()) {
@@ -269,54 +260,12 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
           _dataIndexMap.insert(recordData);
           LOG(3) << "Insert into TextMapIndex " << member->recordId << " " << documentTermScore;
         } else {
+          ++_specificStats.dupsDropped;
           const TextMapIndex::IndexData recordData = *itC;
           _dataIndexMap.update(itC, _currentChild, documentTermScore, _scoreStatus);
           LOG(3) << "Update  TextMapIndex " << member->recordId << " " << documentTermScore;
         }
-
-        DataMap::iterator it = _dataMap.find(member->recordId);
-        // Found. Store extra.
-        if (_dataMap.end() != it) {
-            it->second.score += documentTermScore;
-            it->second.scoreTerms[_currentChild] = documentTermScore;
-            /*++it->second._collectedNum;
-            if(it->second._collectedNum == it->second.scoreTerms.size()) {
-              it->second.collected = true;
-            }*/
-
-            // Validate if recordID is collected all terms.
-            bool collected = true;
-            for (size_t i = 0; i < it->second.scoreTerms.size(); ++i) {
-                if(0 == it->second.scoreTerms[i]) {
-                  collected = false;
-                  break;
-                }
-            }
-            if(collected) {
-              it->second.collected = true;
-            }
-
-            ++_specificStats.dupsDropped;
-            _ws->free(_currentWorkState.wsid);
-            return PlanStage::NEED_TIME;
-        }
-        
-
-        TextRecordData textRecordData;
-        textRecordData.score = documentTermScore;
-        textRecordData.wsid = _currentWorkState.wsid;
-        // TODO: Maybe wrap into initialization of the variable.
-        textRecordData.scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
-        textRecordData.scoreTerms[_currentChild] = documentTermScore;
-        if (!_dataMap.insert(std::make_pair(member->recordId, textRecordData)).second) {
-            LOG(3) << "that is should not happen " << member->recordId;
-            // Didn't insert because we already had this RecordId inside the map. This should only
-            // happen if we're seeing a newer copy of the same doc in a more recent snapshot.
-            // Throw out the newer copy of the doc.
-            _ws->free(_currentWorkState.wsid);
-            return PlanStage::NEED_TIME;
-        }
-        // member->makeObjOwnedIfNeeded();
+        *out = _currentWorkState.wsid;
         return PlanStage::NEED_TIME;
     } else if (PlanStage::IS_EOF == _currentWorkState.childStatus) {
         LOG(3) << "stage readFromChildren::IS_EOF " << _currentChild;
@@ -335,9 +284,6 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             return PlanStage::IS_EOF;
         }
 
-        _scoreIterator = _dataMap.begin();
-        //_dataIndexMap.resetScopeIterator();
-        // We need to sort _dataMap by score.
         _internalState = State::kReturningResults;
 
         return PlanStage::NEED_TIME;
@@ -404,7 +350,6 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
 
     LOG(3) << "currentAllTermsScore " << currentAllTermsScore ;
     if(0 == currentAllTermsScore) {
-      //_dataIndexMap.scoreStepBack();
       return PlanStage::IS_EOF;
     }
 
@@ -546,19 +491,18 @@ void TextOrStage::doInvalidate(OperationContext* opCtx, const RecordId& dl, Inva
     if (isEOF()) {
         return;
     }
-
-    DataMap::iterator it = _dataMap.find(dl);
-    if (_dataMap.end() != it) {
-        WorkingSetID id = it->second.wsid;
+    TextMapIndex::RecordIndex::iterator itC = _dataIndexMap.findByID(dl);
+    if(itC != _dataIndexMap.endRecords()) {
+        const TextMapIndex::IndexData recordData = *itC;
+        WorkingSetID id = recordData.wsid;
         WorkingSetMember* member = _ws->get(id);
         verify(member->recordId == dl);
-
-        // Add the WSID to the to-be-reviewed list in the WS.
         _ws->flagForReview(id);
         ++_specificStats.recordIdsForgotten;
         // And don't return it from this stage.
-        _dataMap.erase(it);
+        _dataIndexMap.erase(itC);
     }
+    
 }
 
 unique_ptr<PlanStageStats> TextOrStage::getStats() {

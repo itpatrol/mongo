@@ -234,6 +234,12 @@ public:
         _scoreIterator = boost::multi_index::get<Score>(_container).begin();
       }
     }
+    void erase(TextMapIndex::RecordIndex::iterator itC) {
+        if (_container.empty()) {
+            return;
+        }
+        _container.erase(itC);
+    }
 
     /**
      * Returns the number of elements in the cache.

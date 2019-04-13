@@ -162,19 +162,6 @@ private:
     TextMapIndex _dataIndexMap;
 
     TextMapIndex::ScoreIndex::iterator _tmiScoreIterator;
-    //TextMapIndex::const_iterator _scoreIndexMapIterator;
-
-    // _dataMap is filled out by the first child and probed by subsequent children.  This is the
-    // hash table that we create by intersecting _children and probe with the last child.
-    typedef unordered_map<RecordId, TextRecordData, RecordId::Hasher> DataMap;
-    DataMap _dataMap;
-
-    DataMap::const_iterator _scoreIterator;
-
-    // Keeps track of what elements from _dataMap subsequent children have seen.
-    // Only used while _hashingChildren.
-    // typedef unordered_set<RecordId, RecordId::Hasher> SeenMap;
-    // SeenMap _seenMap;
 
     // What state are we in?  See the State enum above.
     State _internalState = State::kReadingTerms;
