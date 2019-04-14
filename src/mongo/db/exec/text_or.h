@@ -153,18 +153,6 @@ private:
     // The index spec used to determine where to find the score.
     FTSSpec _ftsSpec;
 
-
-    struct TextRecordData {
-        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {
-        }
-        WorkingSetID wsid;
-        double score;
-        bool advanced;
-        std::vector<double> scoreTerms;
-        bool collected;
-        //size_t _collectedNum;
-    };
-
     TextMapIndex _dataIndexMap;
 
     TextMapIndex::ScoreIndex::iterator _tmiScoreIterator;
@@ -196,6 +184,9 @@ private:
 
     // Stats
     TextOrStats _specificStats;
+
+    long long _debugCounterInsert = 0;
+    long long _debugCounterUpdate = 0;
 
     
 };

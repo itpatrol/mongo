@@ -37,6 +37,25 @@ class TextMapIndex {
 public:
     struct IndexData{
       IndexData(): wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {}
+      IndexData(RecordId _recordId,
+                WorkingSetID _wsid,
+                double _score,
+                double _predictScore,
+                bool _advanced,
+                std::vector<double> _scoreTerms,
+                std::vector<double> _scorePredictTerms)
+      : recordId(_recordId),
+        wsid(_wsid),
+        score(_score),
+        predictScore(_predictScore),
+        advanced(_advanced) {
+          scoreTerms = _scoreTerms;
+          scorePredictTerms = _scorePredictTerms;
+        }
+      IndexData(RecordId _recordId,
+                WorkingSetID _wsid)
+      : recordId(_recordId),
+        wsid(_wsid) {}
       RecordId recordId;
       WorkingSetID wsid;
       double score;
@@ -239,6 +258,14 @@ public:
             return;
         }
         _container.erase(itC);
+    }
+
+    void reserve(size_t m) {
+      _container.reserve(m);
+    }
+    template <typename... Args>
+    void emplace(Args&&... args){
+      _container.emplace(std::forward<Args>(args)...);
     }
 
     /**
