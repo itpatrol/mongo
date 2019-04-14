@@ -153,17 +153,7 @@ private:
     // The index spec used to determine where to find the score.
     FTSSpec _ftsSpec;
 
-
-    struct TextRecordData {
-        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {
-        }
-        WorkingSetID wsid;
-        double score;
-        bool advanced;
-        std::vector<double> scoreTerms;
-        bool collected;
-        //size_t _collectedNum;
-    };
+    std::vector<TextMapIndex::IndexData> _dataIndexVector;
 
     TextMapIndex _dataIndexMap;
 
@@ -197,7 +187,26 @@ private:
     // Stats
     TextOrStats _specificStats;
 
-    
+    long long _debugCounter = 0;
+    long long _debugCounterScore = 0;
+    long long _debugCounterChild = 0;
+    long long _debugCounterChild2 = 0;
+    long long _debugCounterInsert = 0;
+    long long _debugCounterUpdate = 0;
+    long long _debugCounterFind = 0;
+    long long _debugCounterNoRecords = 0;
+    long long _debugCounterChildWork = 0;
+    long long _debugCounterAfterNextDoWork = 0;
+    long long _debugCounterAfterGetWorker = 0;
+    long long _debugCounterAfterFlagForReview=0;
+    long long _debugCounterAfterFindByID = 0;
+    long long _debugCounterAfterPrepareRecordData = 0;
+    long long _debugCounterAfterLog = 0;
+    long long _debugCounterProcessAdvance = 0; 
+    long long _debugCounterAfterEOF =0 ;
+    long long _debugCounterAfterReadFromChildren = 0;
+    long long _debugCounterBeforeInsert =0 ;
+    long long _debugCounterBeforeUpdate = 0;
 };
 
 }  // namespace mongo

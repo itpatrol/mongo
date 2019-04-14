@@ -36,7 +36,27 @@ class TextMapIndex {
 
 public:
     struct IndexData{
-      IndexData(): wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {}
+      IndexData(): recordId(),
+        wsid(WorkingSet::INVALID_ID),
+        score(0.0),
+        predictScore(0.0),
+        advanced(false),
+        scoreTerms(0),
+        scorePredictTerms(0){}
+      IndexData(RecordId _recordId,
+                WorkingSetID _wsid,
+                double _score,
+                double _predictScore,
+                bool _advanced,
+                size_t scoreTermsSize,
+                size_t scorePredictTermsSize)
+      : recordId(_recordId),
+        wsid(_wsid),
+        score(_score),
+        predictScore(_predictScore),
+        advanced(_advanced),
+        scoreTerms(scoreTermsSize),
+        scorePredictTerms(scorePredictTermsSize) {}
       RecordId recordId;
       WorkingSetID wsid;
       double score;
@@ -44,7 +64,6 @@ public:
       bool advanced;
       std::vector<double> scoreTerms;
       std::vector<double> scorePredictTerms;
-      bool collected;
 
     };
     struct Records {};
@@ -53,7 +72,7 @@ public:
 
     using IndexContainer = 
       multi_index_container<
-      IndexData,
+      IndexData *,
       indexed_by< // list of indexes
           hashed_unique<  //hashed index over 'l'
             tag<Records>, // give that index a name
@@ -115,23 +134,23 @@ public:
         _scoreStatus = scoreStatus;
       }
 
-      void operator()(IndexData& record)
+      void operator()(IndexData* record)
       {
 
-        record.score = 0;
-        record.predictScore = 0;
-        if(record.advanced) {
+        record->score = 0;
+        record->predictScore = 0;
+        if(record->advanced) {
           return;
         }
         
-        for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
-          record.score += record.scoreTerms[i];
-          if(0 == record.scoreTerms[i]) {
-            record.scorePredictTerms[i] = _scoreStatus[i];
+        for (size_t i = 0; i < record->scoreTerms.size(); ++i) {
+          record->score += record->scoreTerms[i];
+          if(0 == record->scoreTerms[i]) {
+            record->scorePredictTerms[i] = _scoreStatus[i];
           } else {
-            record.scorePredictTerms[i] = record.scoreTerms[i];
+            record->scorePredictTerms[i] = record->scoreTerms[i];
           }
-          record.predictScore += record.scorePredictTerms[i];
+          record->predictScore += record->scorePredictTerms[i];
         }
       }
 
@@ -144,26 +163,26 @@ public:
         _scoreStatus = scoreStatus;
       }
 
-      void operator()(IndexData& record)
+      void operator()(IndexData* record)
       {
         //std::cout << "\nupdateScore " << record.score << " predict " << record.predictScore
         //  << " recordID" << record.recordId;
-        if(record.advanced) {
-          record.scoreTerms[termID] = newScore;
-          record.predictScore = 0;
-          record.score = 0;
+        if(record->advanced) {
+          record->scoreTerms[termID] = newScore;
+          record->predictScore = 0;
+          record->score = 0;
           return;
         }
-        record.score += newScore;
-        record.scoreTerms[termID] = newScore;
-        record.predictScore = 0;
-        for (size_t i = 0; i < record.scorePredictTerms.size(); ++i) {
-          if(0 == record.scoreTerms[i]) {
-            record.scorePredictTerms[i] = _scoreStatus[i];
+        record->score += newScore;
+        record->scoreTerms[termID] = newScore;
+        record->predictScore = 0;
+        for (size_t i = 0; i < record->scorePredictTerms.size(); ++i) {
+          if(0 == record->scoreTerms[i]) {
+            record->scorePredictTerms[i] = _scoreStatus[i];
           } else {
-            record.scorePredictTerms[i] = record.scoreTerms[i];
+            record->scorePredictTerms[i] = record->scoreTerms[i];
           }
-          record.predictScore += record.scorePredictTerms[i];
+          record->predictScore += record->scorePredictTerms[i];
         }
       }
 
@@ -176,11 +195,11 @@ public:
     struct trueAdvance {
       trueAdvance(bool advanced):advanced(advanced){}
 
-      void operator()(IndexData& record)
+      void operator()(IndexData* record)
       {
-        record.advanced = advanced;
-        record.predictScore = 0;
-        record.score = 0;
+        record->advanced = advanced;
+        record->predictScore = 0;
+        record->score = 0;
       }
       private:
         bool advanced;
@@ -207,7 +226,7 @@ public:
     }
 
     IndexData getScore(){
-      return *_scoreIterator;
+      return **_scoreIterator;
     }
 
     void scoreStepBack(){
@@ -223,10 +242,10 @@ public:
       if(_scoreIterator == boost::multi_index::get<Score>(_container).end()) {
         return IndexData();
       }
-      return *_scoreIterator;
+      return **_scoreIterator;
     }
 
-    void insert(IndexData data) {
+    void insert(IndexData * data) {
       //std::cout << "\n insert " << data.recordId << " score " << data.score;
       _container.insert(data);
       if(1 == _container.size()) {
@@ -240,7 +259,9 @@ public:
         }
         _container.erase(itC);
     }
-
+    void reserve(size_t m) {
+      _container.reserve(m);
+    }
     /**
      * Returns the number of elements in the cache.
      */
