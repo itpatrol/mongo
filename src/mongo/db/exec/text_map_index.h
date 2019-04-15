@@ -12,6 +12,7 @@
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index_container.hpp>
+#include <boost/container/small_vector.hpp>
 #include <boost/optional.hpp>
 #include <vector>
 
@@ -35,6 +36,8 @@ using std::vector;
 class TextMapIndex {
 
 public:
+    typedef boost::container::small_vector<double, 10> ScoreStorage;
+
     struct IndexData{
       IndexData(): wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {}
       IndexData(RecordId _recordId,
@@ -42,8 +45,8 @@ public:
                 double _score,
                 double _predictScore,
                 bool _advanced,
-                std::vector<double> _scoreTerms,
-                std::vector<double> _scorePredictTerms)
+                ScoreStorage _scoreTerms,
+                ScoreStorage _scorePredictTerms)
       : recordId(_recordId),
         wsid(_wsid),
         score(_score),
@@ -61,8 +64,8 @@ public:
       double score;
       double predictScore;
       bool advanced;
-      std::vector<double> scoreTerms;
-      std::vector<double> scorePredictTerms;
+      ScoreStorage scoreTerms;
+      ScoreStorage scorePredictTerms;
       bool collected;
 
     };
@@ -95,7 +98,7 @@ public:
     typedef IndexContainer::index<Score>::type ScoreIndex;
     typedef IndexContainer::index<ScorePredict>::type ScorePredictIndex;
     typedef IndexContainer::index<Records>::type RecordIndex;
-
+    
     RecordIndex::iterator findByID(const RecordId& recordId) {
       return boost::multi_index::get<Records>(_container).find(recordId);
     };
@@ -142,7 +145,7 @@ public:
         if(record.advanced) {
           return;
         }
-        
+
         for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
           record.score += record.scoreTerms[i];
           if(0 == record.scoreTerms[i]) {
@@ -165,16 +168,18 @@ public:
 
       void operator()(IndexData& record)
       {
-        //std::cout << "\nupdateScore " << record.score << " predict " << record.predictScore
-        //  << " recordID" << record.recordId;
+        /*std::cout << "\n before update ";
+        std::cout << "\n update ";
+        std::cout << "\n scoreTerms " << record.scoreTerms.size();
+        std::cout << "\n scorePredictTerms " << record.scorePredictTerms.size();*/
+        record.scoreTerms[termID] = newScore;
         if(record.advanced) {
-          record.scoreTerms[termID] = newScore;
           record.predictScore = 0;
           record.score = 0;
           return;
         }
+        //std::cout << "\n update 1 ";
         record.score += newScore;
-        record.scoreTerms[termID] = newScore;
         record.predictScore = 0;
         for (size_t i = 0; i < record.scorePredictTerms.size(); ++i) {
           if(0 == record.scoreTerms[i]) {
@@ -184,6 +189,7 @@ public:
           }
           record.predictScore += record.scorePredictTerms[i];
         }
+        //std::cout << "\n update 2 ";
       }
 
       private:

@@ -274,19 +274,24 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
           recordData.scoreTerms[_currentChild] = documentTermScore;
           recordData.scorePredictTerms[_currentChild] = documentTermScore;
           _dataIndexMap.insert(recordData);*/
-          
-          auto scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
-          auto scorePredictTerms = std::vector<double>(_indexerStatus.size(), 0);
+
+          TextMapIndex::ScoreStorage scoreTerms = TextMapIndex::ScoreStorage();
+          //auto scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
+          TextMapIndex::ScoreStorage scorePredictTerms = TextMapIndex::ScoreStorage();
           double PredictScore = 0;
           for (size_t i = 0; i < _scoreStatus.size(); ++i) {
             if(i != _currentChild) {
               PredictScore += _scoreStatus[i];
-              scorePredictTerms[i] = _scoreStatus[i];
+              scorePredictTerms.push_back(_scoreStatus[i]);
+              scoreTerms.push_back(0);
+            } else {
+              scorePredictTerms.push_back(documentTermScore);
+              scoreTerms.push_back(documentTermScore);
             }
             
           }
-          scoreTerms[_currentChild] = documentTermScore;
-          scorePredictTerms[_currentChild] = documentTermScore;
+          //scoreTerms[_currentChild] = documentTermScore;
+          //scorePredictTerms[_currentChild] = documentTermScore;
           _dataIndexMap.emplace(member->recordId,
                                 _currentWorkState.wsid,
                                 documentTermScore,
@@ -299,7 +304,8 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
           LOG(3) << "Insert into TextMapIndex " << member->recordId << " " << documentTermScore;
         } else {
           ++_specificStats.dupsDropped;
-          const TextMapIndex::IndexData recordData = *itC;
+          //const TextMapIndex::IndexData recordData = *itC;
+          LOG(3) << "Update into " << member->recordId << " ";
           _dataIndexMap.update(itC, _currentChild, documentTermScore, _scoreStatus);
           LOG(3) << "Update  TextMapIndex " << member->recordId << " " << documentTermScore;
           _debugCounterUpdate += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();

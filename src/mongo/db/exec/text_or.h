@@ -188,6 +188,8 @@ private:
     long long _debugCounterInsert = 0;
     long long _debugCounterUpdate = 0;
 
+    std::vector<std::vector<double>> termsScore;
+
     
 };
 
