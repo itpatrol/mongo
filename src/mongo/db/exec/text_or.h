@@ -101,6 +101,7 @@ public:
     static const char* kStageType;
     static const size_t kChildIsEOF;
     static const size_t kReleaseEachNum;
+    static const size_t kMinReserve;
 
 private:
 
@@ -189,6 +190,8 @@ private:
     long long _debugCounterUpdate = 0;
 
     std::vector<std::vector<double>> termsScore;
+
+    size_t _reserved = 0;
 
     
 };

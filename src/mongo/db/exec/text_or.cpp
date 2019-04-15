@@ -45,18 +45,11 @@ using std::unique_ptr;
 using std::vector;
 using stdx::make_unique;
 
-
-/*
-std::size_t hash_value(RecordId const& b){
-    RecordId::Hasher hasher;
-    return hasher(b);
-};*/
-
-
 // static
 const char* TextOrStage::kStageType = "TEXT_OR";
 const size_t TextOrStage::kChildIsEOF = -1;
 const size_t TextOrStage::kReleaseEachNum = 1000;
+const size_t TextOrStage::kMinReserve = 1000;
 
 TextOrStage::TextOrStage(OperationContext* opCtx,
                          WorkingSet* ws,
@@ -71,12 +64,13 @@ TextOrStage::TextOrStage(OperationContext* opCtx,
       _indexerStatus(0),
       _scoreStatus(0),
       _wantTextScore(wantTextScore) {
-    LOG(2) << "Freq " << _query.getFreq() ;
+    //LOG(2) << "Freq " << _query.getFreq() ;
     _specificStats.wantTextScore = _wantTextScore;
     //_tmiScoreIterator = _dataIndexMap.beginScore();
     _dataIndexMap.resetScopeIterator();
-    _dataIndexMap.reserve(_query.getFreq());
-
+    _reserved = kMinReserve;
+    _dataIndexMap.reserve(_reserved);
+    
 }
 
 void TextOrStage::addChild(PlanStage* child) {
@@ -167,12 +161,12 @@ bool TextOrStage::isChildrenEOF(){
   for (size_t i = 0; i < _children.size(); ++i) {
       if(kChildIsEOF != _indexerStatus[i]) {
           // We have another child to read from.
-          LOG(3) << "Is not EOF " << i << " " << _indexerStatus[i];
+          //LOG(3) << "Is not EOF " << i << " " << _indexerStatus[i];
           return false;
       }
-      LOG(3) << "Is EOF " << i << " " << _indexerStatus[i];
+      //LOG(3) << "Is EOF " << i << " " << _indexerStatus[i];
   }
-  LOG(3) << "Is EOF " << _children.size();
+  //LOG(3) << "Is EOF " << _children.size();
   return true;
 }
 
@@ -188,17 +182,17 @@ bool TextOrStage::processNextDoWork(){
             _currentChild = 0;
         }
         if(kChildIsEOF != _indexerStatus[_currentChild]) {
-            LOG(3) << "next Child " << _currentChild << " state" << _indexerStatus[_currentChild];
+            //LOG(3) << "next Child " << _currentChild << " state" << _indexerStatus[_currentChild];
             break;
         }
         --isCheckingNextLength;
     }
     if(0 == isCheckingNextLength) {
-      LOG(3) << "All processed ";
+      //LOG(3) << "All processed ";
       // Nothing left to process.
       return false;
     }
-    LOG(3) << "process For Child " << _currentChild;
+    //LOG(3) << "process For Child " << _currentChild;
     _currentWorkState.wsid = WorkingSet::INVALID_ID;
     _currentWorkState.childStatus = _children[_currentChild]->work(&_currentWorkState.wsid);
 
@@ -211,7 +205,7 @@ bool TextOrStage::processNextDoWork(){
 }
 
 PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
-  LOG(3) << "stage readFromChildren";
+  //LOG(3) << "stage readFromChildren";
     // Check to see if there were any children added in the first place.
     if (_children.size() == 0) {
         _internalState = State::kDone;
@@ -226,7 +220,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
 
     
     if (PlanStage::ADVANCED == _currentWorkState.childStatus) {
-        LOG(3) << "stage readFromChildren::ADVANCED";
+        //LOG(3) << "stage readFromChildren::ADVANCED";
         WorkingSetMember* member = _ws->get(_currentWorkState.wsid);
         // Maybe the child had an invalidation.  We intersect RecordId(s) so we can't do anything
         // with this WSM.
@@ -235,6 +229,13 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             return PlanStage::NEED_TIME;
         }
         ++_specificStats.dupsTested;
+
+        // Incriase reserve for speed performance
+        if(_reserved < _dataIndexMap.size()) {
+          _reserved += _dataIndexMap.size() * _children.size();
+          _dataIndexMap.reserve(_reserved);
+        }
+
         auto startReadFrom = std::chrono::high_resolution_clock::now();
         if (!_wantTextScore) {
             TextMapIndex::RecordIndex::iterator itC = _dataIndexMap.findByID(member->recordId);
@@ -251,7 +252,7 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             _dataIndexMap.emplace(member->recordId,
                                 _currentWorkState.wsid);
 
-            LOG(3) << "stage ADVANCE";
+            //LOG(3) << "stage ADVANCE";
             _debugCounterInsert += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
 
             *out = _currentWorkState.wsid;
@@ -301,36 +302,37 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
                                 scorePredictTerms);
 
           _debugCounterInsert += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
-          LOG(3) << "Insert into TextMapIndex " << member->recordId << " " << documentTermScore;
+          //LOG(3) << "Insert into TextMapIndex " << member->recordId << " " << documentTermScore;
         } else {
           ++_specificStats.dupsDropped;
           //const TextMapIndex::IndexData recordData = *itC;
-          LOG(3) << "Update into " << member->recordId << " ";
+          //LOG(3) << "Update into " << member->recordId << " ";
           _dataIndexMap.update(itC, _currentChild, documentTermScore, _scoreStatus);
-          LOG(3) << "Update  TextMapIndex " << member->recordId << " " << documentTermScore;
+          //LOG(3) << "Update  TextMapIndex " << member->recordId << " " << documentTermScore;
           _debugCounterUpdate += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
         }
         *out = _currentWorkState.wsid;
         return PlanStage::NEED_TIME;
     } else if (PlanStage::IS_EOF == _currentWorkState.childStatus) {
-        LOG(3) << "stage readFromChildren::IS_EOF " << _currentChild;
+        //LOG(3) << "stage readFromChildren::IS_EOF " << _currentChild;
         // Done with _currentChild, mark so.
         _indexerStatus[_currentChild] = kChildIsEOF;
         currentAllTermsScore -= _scoreStatus[_currentChild];
         _scoreStatus[_currentChild] = 0;
-        LOG(3) << "set EOF " << _currentChild << _indexerStatus[_currentChild];
+        //LOG(3) << "set EOF " << _currentChild << _indexerStatus[_currentChild];
 
         // Check if we done with all children
         if(!isChildrenEOF()) {
           return PlanStage::NEED_TIME;
         }
-        LOG(3) << "Finished on ";
-        for (size_t i = 0; i < _scoreStatus.size(); ++i) {
-          LOG(3) << " " << i << " " << _scoreStatus[i];
-        }
+        //LOG(3) << "Finished on ";
+        //for (size_t i = 0; i < _scoreStatus.size(); ++i) {
+          //LOG(3) << " " << i << " " << _scoreStatus[i];
+        //}
 
         LOG(1) << "_debugCounterInsert " << _debugCounterInsert ;
         LOG(1) << "_debugCounterUpdate " << _debugCounterUpdate ;
+        _dataIndexMap.resetScopeIterator();
             
         if (!_wantTextScore) {
             _internalState = State::kDone;
@@ -341,14 +343,14 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
 
         return PlanStage::NEED_TIME;
     }
-    LOG(3) << "stage readFromChildren::UNKNOWN";
+    //LOG(3) << "stage readFromChildren::UNKNOWN";
     // NEED_TIME, ERROR, NEED_YIELD, pass them up.
     *out = _currentWorkState.wsid;
     return _currentWorkState.childStatus;
 }
 
 PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
-    LOG(3) << "stage readFromChild";
+    //LOG(3) << "stage readFromChild";
     if(!processNextDoWork()) {
       return PlanStage::IS_EOF;
     }
@@ -380,56 +382,58 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
     return _currentWorkState.childStatus;
 }
 PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
-    LOG(3) << "stage returnReadyResults";
+    //LOG(3) << "stage returnReadyResults";
 
     // If we already in kReturningResults, pass request there.
     if(_internalState == State::kReturningResults) {
       return PlanStage::IS_EOF;
     }
-    if(releaseEachNum < _query.getFreq() ) {
-      LOG(2) << "Skip Releasing" <<  releaseEachNum << " " << _query.getFreq();
+    /*if(releaseEachNum < TextOrStage::kReleaseEachNum ) {
+      //LOG(2) << "Skip Releasing" <<  releaseEachNum << " " << _query.getFreq();
       releaseEachNum++;
       return PlanStage::IS_EOF;
-    }
+    }*/
+
+    if(_predictScoreStatBase > 0 && _predictScoreDiff > 0) {
+      if( _predictScoreStatBase - currentAllTermsScore < _predictScoreDiff) {
+        //LOG(3) << "_predictScoreStatBase " << _predictScoreStatBase
+        //  << " _predictScoreDiff " << _predictScoreDiff
+        //  << " currentAllTermsScore " << currentAllTermsScore
+        //  << " current Diff " << (_predictScoreStatBase - currentAllTermsScore);
+        //We still did not overcome a diff
+        //releaseEachNum = 0;
+        return PlanStage::IS_EOF;
+      }
+    } 
 
 
     _dataIndexMap.resetScopeIterator();
 
     if(_dataIndexMap.size() < 2) {
-      LOG(3) << "_dataIndexMap size" <<  _dataIndexMap.size() ;
+      //LOG(3) << "_dataIndexMap size" <<  _dataIndexMap.size() ;
       return PlanStage::IS_EOF;
     }
-    LOG(3) << "_dataIndexMap size: " <<  _dataIndexMap.size() ;
+    //LOG(3) << "_dataIndexMap size: " <<  _dataIndexMap.size() ;
     if(_dataIndexMap.isScoreEmpty()) {
-      LOG(3) << "_dataIndexMap isScoreEmpty" <<  _dataIndexMap.size() ;
+      //LOG(3) << "_dataIndexMap isScoreEmpty" <<  _dataIndexMap.size() ;
       return PlanStage::IS_EOF;
     }
 
-    LOG(3) << "currentAllTermsScore " << currentAllTermsScore ;
+    //LOG(3) << "currentAllTermsScore " << currentAllTermsScore ;
     if(0 == currentAllTermsScore) {
       return PlanStage::IS_EOF;
     }
 
-    if(_predictScoreStatBase > 0 && _predictScoreDiff > 0) {
-      if( _predictScoreStatBase - currentAllTermsScore < _predictScoreDiff) {
-        LOG(3) << "_predictScoreStatBase " << _predictScoreStatBase
-          << " _predictScoreDiff " << _predictScoreDiff
-          << " currentAllTermsScore " << currentAllTermsScore
-          << " current Diff " << (_predictScoreStatBase - currentAllTermsScore);
-        //We still did not overcome a diff
-        releaseEachNum = 0;
-        return PlanStage::IS_EOF;
-      }
-    } 
+    
     
     TextMapIndex::IndexData recordData = _dataIndexMap.getScore();
-    LOG(3) << "Found in TextMapIndex" 
-            << "| recordID" << recordData.recordId 
-            << "| wsid" << recordData.wsid 
-            << "| score " << recordData.score;
-      for (size_t i = 0; i < recordData.scoreTerms.size(); ++i) {
-          LOG(3) << "| term " << i << " " << recordData.scoreTerms[i];
-      }
+    //LOG(3) << "Found in TextMapIndex" 
+    //        << "| recordID" << recordData.recordId 
+    //        << "| wsid" << recordData.wsid 
+    //        << "| score " << recordData.score;
+    //  for (size_t i = 0; i < recordData.scoreTerms.size(); ++i) {
+          //LOG(3) << "| term " << i << " " << recordData.scoreTerms[i];
+    //  }
     if( 0 == recordData.score) {
       return PlanStage::IS_EOF;
     }
@@ -437,11 +441,11 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
 
     // Check if it is still possible to receive record that matcha ll terms and score better.
     if(recordData.score < currentAllTermsScore) {
-      LOG(3) << "Possible max score record  " << currentAllTermsScore;
+      //LOG(3) << "Possible max score record  " << currentAllTermsScore;
       return PlanStage::IS_EOF;
     }
 
-    LOG(3) << "Currend Diff   " << recordData.score - currentAllTermsScore;
+    //LOG(3) << "Currend Diff   " << recordData.score - currentAllTermsScore;
     
 
   // Count how many records with predict score > that currentAllTermsScore;
@@ -455,15 +459,15 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         break;
       }
 
-      LOG(3) << "Found in TextMapIndex::predictRecordData " 
-              << "| recordID " << predictRecordData.recordId 
-              << "| wsid " << predictRecordData.wsid 
-              << "| score " << predictRecordData.score
-              << "| predictScore " << predictRecordData.predictScore
-              << "| advanced " << predictRecordData.advanced;
-        for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
-            LOG(3) << "| term " << i << " " << predictRecordData.scoreTerms[i];
-        }
+      //LOG(3) << "Found in TextMapIndex::predictRecordData " 
+      //        << "| recordID " << predictRecordData.recordId 
+      //        << "| wsid " << predictRecordData.wsid 
+      //        << "| score " << predictRecordData.score
+      //        << "| predictScore " << predictRecordData.predictScore
+      //        << "| advanced " << predictRecordData.advanced;
+      //  for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
+            //LOG(3) << "| term " << i << " " << predictRecordData.scoreTerms[i];
+      //  }
       // Check if breaking
       double totalScoreDiff = recordData.score - predictRecordData.score;
       double expectedMaxScoreForSecond = 0;
@@ -475,18 +479,18 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
       if(totalScoreDiff < expectedMaxScoreForSecond) {
         // Our diff is smaller that possible changes.
         // break checking
-        LOG(3) << "Break checking still out of order ";
-        LOG(3) << "totalScoreDiff  " << totalScoreDiff
-             << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
-        LOG(3) << "ScorePredict Count " << predictCount << " max " <<  _dataIndexMap.size() ;
+        //LOG(3) << "Break checking still out of order ";
+        //LOG(3) << "totalScoreDiff  " << totalScoreDiff
+        //     << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
+        //LOG(3) << "ScorePredict Count " << predictCount << " max " <<  _dataIndexMap.size() ;
         _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff; 
         _predictScoreStatBase = currentAllTermsScore;
         releaseEachNum = 0;
         return PlanStage::IS_EOF;
       } else {
-        LOG(3) << "Skipping due to smaller actual";
-        LOG(3) << "totalScoreDiff  " << totalScoreDiff
-             << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
+        //LOG(3) << "Skipping due to smaller actual";
+        //LOG(3) << "totalScoreDiff  " << totalScoreDiff
+        //     << "expectedMaxScoreForSecond " << expectedMaxScoreForSecond;
         // Recalculate it.
         ++itScorePredict;
         _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
@@ -498,13 +502,13 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
         break;
       }
     }
-    LOG(3) << "ScorePredict Count " << predictCount << " max " <<  _dataIndexMap.size() ;
+    //LOG(3) << "ScorePredict Count " << predictCount << " max " <<  _dataIndexMap.size() ;
 
 // If we are here - we goof
 
-    LOG(3) << "Advance " << recordData.wsid 
-          << " ID " << recordData.recordId
-          << " score " << recordData.score;
+    //LOG(3) << "Advance " << recordData.wsid 
+    //      << " ID " << recordData.recordId
+    //      << " score " << recordData.score;
     _dataIndexMap.setAdvanced(recordData.recordId );
     WorkingSetMember* wsm = _ws->get(recordData.wsid);
     // Populate the working set member with the text score and return it.
@@ -518,8 +522,8 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
 }
 
 PlanStage::StageState TextOrStage::returnResults(WorkingSetID* out) {
-    LOG(3) << "stage returnResults";
-    LOG(3) << "stage End" << _dataIndexMap.size();
+    //LOG(3) << "stage returnResults";
+    //LOG(3) << "stage End" << _dataIndexMap.size();
 
     if(_dataIndexMap.isScoreEmpty()) {
       _internalState = State::kDone;

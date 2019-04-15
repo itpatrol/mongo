@@ -269,6 +269,7 @@ public:
     void reserve(size_t m) {
       _container.reserve(m);
     }
+
     template <typename... Args>
     void emplace(Args&&... args){
       _container.emplace(std::forward<Args>(args)...);
