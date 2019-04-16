@@ -182,8 +182,6 @@ bool TextOrStage::processNextDoWork(){
     _currentWorkState.wsid = WorkingSet::INVALID_ID;
     _currentWorkState.childStatus = _children[_currentChild]->work(&_currentWorkState.wsid);
 
-    // Update stats counters.
-    ++_specificStats.indexerCouter[_currentChild];
     if(kChildIsEOF != _indexerStatus[_currentChild]) {
       ++_indexerStatus[_currentChild];
     }
@@ -235,7 +233,8 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
 
 
             _debugCounterInsert += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
-
+            // Update stats counters.
+            ++_specificStats.indexerCouter[_currentChild];
             *out = _currentWorkState.wsid;
             return PlanStage::ADVANCED;
         }
@@ -318,7 +317,8 @@ PlanStage::StageState TextOrStage::readFromChild(WorkingSetID* out) {
             _ws->flagForReview(_currentWorkState.wsid);
             return PlanStage::NEED_TIME;
         }
-
+        // Update stats counters.
+        ++_specificStats.indexerCouter[_currentChild];
         if (!_wantTextScore) {
             *out = _currentWorkState.wsid;
             return PlanStage::ADVANCED;
@@ -425,6 +425,8 @@ PlanStage::StageState TextOrStage::returnReadyResults(WorkingSetID* out) {
     } else {
         wsm->addComputed(new TextScoreComputedData(recordData.score));
     }
+    // Update stats counters.
+    ++_specificStats.indexerCouter[_currentChild];
     *out = recordData.wsid;
     return PlanStage::ADVANCED;
 }

@@ -128,12 +128,12 @@ PlanStage::StageState TextAndStage::doWork(WorkingSetID* out) {
     switch (_internalState) {
         case State::kReadingTerms:
             // It's for score releasing only.
-            /*if(_wantTextScore) {
+            if(_isNoMoreInserts) {
               stageState = returnReadyResults(out);
               if(stageState != PlanStage::IS_EOF) {
                 return stageState;
               }
-            }*/
+            }
             stageState = readFromChildren(out);
             break;
         case State::kReturningResults:
@@ -266,7 +266,7 @@ PlanStage::StageState TextAndStage::readFromChildren(WorkingSetID* out) {
             }
 
             _dataIndexMap.emplace(member->recordId,
-                                _currentWorkState.wsid, 1, scoreTerms);
+                                _currentWorkState.wsid, 0, scoreTerms);
 
 
             _debugCounterInsert += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
@@ -307,7 +307,7 @@ PlanStage::StageState TextAndStage::readFromChildren(WorkingSetID* out) {
         }
         _dataIndexMap.emplace(member->recordId,
                               _currentWorkState.wsid,
-                              documentTermScore,
+                              0,
                               PredictScore,
                               false,
                               scoreTerms,
@@ -381,6 +381,104 @@ PlanStage::StageState TextAndStage::readFromChild(WorkingSetID* out) {
     return _currentWorkState.childStatus;
 }
 
+PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
+
+    // If we already in kReturningResults, pass request there.
+    if(_internalState == State::kReturningResults) {
+      return PlanStage::IS_EOF;
+    }
+
+
+    if(_predictScoreStatBase > 0 && _predictScoreDiff > 0) {
+      if( _predictScoreStatBase - currentAllTermsScore < _predictScoreDiff) {
+        //We still did not overcome a diff
+        return PlanStage::IS_EOF;
+      }
+    } 
+
+
+    _dataIndexMap.resetScopeIterator();
+
+    if(_dataIndexMap.size() < 2) {
+      return PlanStage::IS_EOF;
+    }
+    if(_dataIndexMap.isScoreEmpty()) {
+      return PlanStage::IS_EOF;
+    }
+
+    if(0 == currentAllTermsScore) {
+      return PlanStage::IS_EOF;
+    }
+
+    
+    
+    TextMapIndex::IndexData recordData = _dataIndexMap.getScore();
+    if( 0 == recordData.score) {
+      return PlanStage::IS_EOF;
+    }
+    if(!recordData.collected) {
+      return PlanStage::IS_EOF;
+    }
+
+    // Check if it is still possible to receive record that match all terms and score better.
+    if(recordData.score < currentAllTermsScore) {
+      return PlanStage::IS_EOF;
+    }
+
+    
+
+    // Count how many records with predict score > that currentAllTermsScore;
+    TextMapIndex::ScorePredictIndex::iterator itScorePredict = _dataIndexMap.beginScorePredict();
+    size_t predictCount = 0;
+    while(true) {
+      TextMapIndex::IndexData predictRecordData = *itScorePredict;
+      ++itScorePredict;
+      ++predictCount;
+      if(predictRecordData.predictScore <= recordData.score) {
+        break;
+      }
+
+      // Check if breaking
+      double totalScoreDiff = recordData.score - predictRecordData.score;
+      double expectedMaxScoreForSecond = 0;
+      for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
+        if(0 == predictRecordData.scoreTerms[i])  {
+          expectedMaxScoreForSecond += _scoreStatus[i];
+        }
+      }
+      if(totalScoreDiff < expectedMaxScoreForSecond) {
+        _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff; 
+        _predictScoreStatBase = currentAllTermsScore;
+        return PlanStage::IS_EOF;
+      } else {
+        // Recalculate predict score for this record.
+        ++itScorePredict;
+        _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
+        --itScorePredict;
+
+      }
+      
+      if(itScorePredict == _dataIndexMap.endScorePredict()){
+        break;
+      }
+    }
+
+    // If we are here - we good to advance this record.
+
+    _dataIndexMap.setAdvanced(recordData.recordId );
+    WorkingSetMember* wsm = _ws->get(recordData.wsid);
+    // Populate the working set member with the text score and return it.
+    if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
+        wsm->updateComputed(new TextScoreComputedData(recordData.score));
+    } else {
+        wsm->addComputed(new TextScoreComputedData(recordData.score));
+    }
+    // Update stats counters.
+    ++_specificStats._counter[_currentChild];
+    *out = recordData.wsid;
+    return PlanStage::ADVANCED;
+}
+
 PlanStage::StageState TextAndStage::returnResults(WorkingSetID* out) {
     if(_dataIndexMap.isScoreEmpty()) {
       _internalState = State::kDone;
@@ -431,14 +529,6 @@ PlanStage::StageState TextAndStage::returnResults(WorkingSetID* out) {
     }
     _dataIndexMap.scoreStepForward();
 
-    /*LOG(3) << "Advance in TextMapIndex" 
-        << "| recordID" << textRecordData.recordId 
-        << "| wsid" << textRecordData.wsid 
-        << "| score " << textRecordData.score
-        << "| collected " << textRecordData.collected;
-    for (size_t i = 0; i < textRecordData.scoreTerms.size(); ++i) {
-        LOG(3) << "| term " << i << " " << textRecordData.scoreTerms[i];
-    } ;*/
     WorkingSetMember* wsm = _ws->get(textRecordData.wsid);
     // Populate the working set member with the text score and return it.
     if (wsm->hasComputed(WSM_COMPUTED_TEXT_SCORE)) {
