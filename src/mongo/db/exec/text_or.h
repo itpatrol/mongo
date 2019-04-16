@@ -38,6 +38,7 @@
 
 #include "mongo/db/exec/plan_stage.h"
 #include "mongo/db/exec/text_map_index.h"
+#include "mongo/db/fts/fts_query_impl.h"
 #include "mongo/db/fts/fts_spec.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/record_id.h"
@@ -49,6 +50,7 @@
 namespace mongo {
 
 using fts::FTSSpec;
+using fts::FTSQueryImpl;
 
 /**
  * This stage outputs the union of its children.  It optionally deduplicates on RecordId.
@@ -97,6 +99,7 @@ public:
 
     static const char* kStageType;
     static const size_t kChildIsEOF;
+    static const size_t kMinReserve;
 
 private:
 
@@ -147,21 +150,8 @@ private:
     // The index spec used to determine where to find the score.
     FTSSpec _ftsSpec;
 
-
-    struct TextRecordData {
-        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {
-        }
-        WorkingSetID wsid;
-        double score;
-        bool advanced;
-        std::vector<double> scoreTerms;
-        bool collected;
-        //size_t _collectedNum;
-    };
-
+    //Store Index data in boost multi index container.
     TextMapIndex _dataIndexMap;
-
-    TextMapIndex::ScoreIndex::iterator _tmiScoreIterator;
 
     // What state are we in?  See the State enum above.
     State _internalState = State::kReadingTerms;
@@ -176,10 +166,13 @@ private:
 
     // Collect latest document score per child
     std::vector<double> _scoreStatus;
+
+    // Collect all terms current score
     double currentAllTermsScore =0;
 
-    // True if we dedup on RecordId, false otherwise.
+    // True if query expects scores on RecordId, false otherwise.
     bool _wantTextScore;
+
 
     // Traking latest missing diff from PredictScore
     double _predictScoreDiff = 0 ;
@@ -187,6 +180,15 @@ private:
 
     // Stats
     TextOrStats _specificStats;
+
+    long long _debugCounterInsert = 0;
+    long long _debugCounterUpdate = 0;
+
+    // Current reserved amount of container records. 
+    // Reserving memory upfront speedup data manipulation and insert time into container.
+    size_t _reserved = 0;
+
+    
 };
 
 }  // namespace mongo

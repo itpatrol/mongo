@@ -12,6 +12,7 @@
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index_container.hpp>
+#include <boost/container/small_vector.hpp>
 #include <boost/optional.hpp>
 #include <vector>
 
@@ -35,15 +36,36 @@ using std::vector;
 class TextMapIndex {
 
 public:
+    typedef boost::container::small_vector<double, 10> ScoreStorage;
+
     struct IndexData{
       IndexData(): wsid(WorkingSet::INVALID_ID), score(0.0), advanced(false), collected(false) {}
+      IndexData(RecordId _recordId,
+                WorkingSetID _wsid,
+                double _score,
+                double _predictScore,
+                bool _advanced,
+                ScoreStorage _scoreTerms,
+                ScoreStorage _scorePredictTerms)
+      : recordId(_recordId),
+        wsid(_wsid),
+        score(_score),
+        predictScore(_predictScore),
+        advanced(_advanced) {
+          scoreTerms = _scoreTerms;
+          scorePredictTerms = _scorePredictTerms;
+        }
+      IndexData(RecordId _recordId,
+                WorkingSetID _wsid)
+      : recordId(_recordId),
+        wsid(_wsid) {}
       RecordId recordId;
       WorkingSetID wsid;
       double score;
       double predictScore;
       bool advanced;
-      std::vector<double> scoreTerms;
-      std::vector<double> scorePredictTerms;
+      ScoreStorage scoreTerms;
+      ScoreStorage scorePredictTerms;
       bool collected;
 
     };
@@ -76,7 +98,7 @@ public:
     typedef IndexContainer::index<Score>::type ScoreIndex;
     typedef IndexContainer::index<ScorePredict>::type ScorePredictIndex;
     typedef IndexContainer::index<Records>::type RecordIndex;
-
+    
     RecordIndex::iterator findByID(const RecordId& recordId) {
       return boost::multi_index::get<Records>(_container).find(recordId);
     };
@@ -123,7 +145,7 @@ public:
         if(record.advanced) {
           return;
         }
-        
+
         for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
           record.score += record.scoreTerms[i];
           if(0 == record.scoreTerms[i]) {
@@ -146,16 +168,14 @@ public:
 
       void operator()(IndexData& record)
       {
-        //std::cout << "\nupdateScore " << record.score << " predict " << record.predictScore
-        //  << " recordID" << record.recordId;
+        record.scoreTerms[termID] = newScore;
         if(record.advanced) {
-          record.scoreTerms[termID] = newScore;
           record.predictScore = 0;
           record.score = 0;
           return;
         }
+
         record.score += newScore;
-        record.scoreTerms[termID] = newScore;
         record.predictScore = 0;
         for (size_t i = 0; i < record.scorePredictTerms.size(); ++i) {
           if(0 == record.scoreTerms[i]) {
@@ -165,6 +185,7 @@ public:
           }
           record.predictScore += record.scorePredictTerms[i];
         }
+
       }
 
       private:
@@ -187,7 +208,6 @@ public:
     };
 
     void update(RecordIndex::iterator it, size_t termID, double newScore, std::vector<double> scoreStatus) {
-      //std::cout << "\n update " << termID << " score " << newScore;
       _container.modify(it, updateScore(termID, newScore, scoreStatus));
     };
 
@@ -227,18 +247,22 @@ public:
     }
 
     void insert(IndexData data) {
-      //std::cout << "\n insert " << data.recordId << " score " << data.score;
       _container.insert(data);
-      if(1 == _container.size()) {
-        // Force to set to beggining on first record;
-        _scoreIterator = boost::multi_index::get<Score>(_container).begin();
-      }
     }
     void erase(TextMapIndex::RecordIndex::iterator itC) {
         if (_container.empty()) {
             return;
         }
         _container.erase(itC);
+    }
+
+    void reserve(size_t m) {
+      _container.reserve(m);
+    }
+
+    template <typename... Args>
+    void emplace(Args&&... args){
+      _container.emplace(std::forward<Args>(args)...);
     }
 
     /**
