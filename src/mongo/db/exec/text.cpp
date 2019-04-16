@@ -121,7 +121,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
     std::vector<std::set<std::string>> positivePhrasesBounds =
         _params.query.getTermsPhrasesForBounds();
     // auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
-    auto textAndSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, true);
+    auto textAndSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, wantTextScore);
     std::vector<std::unique_ptr<PlanStage>> indexORScanList;
 
     bool isAndSearch = false;

@@ -54,19 +54,34 @@ public:
         advanced(_advanced) {
           scoreTerms = _scoreTerms;
           scorePredictTerms = _scorePredictTerms;
+          collected = false;
+        }
+      IndexData(RecordId _recordId,
+                WorkingSetID _wsid,
+                double _score,
+                ScoreStorage _scoreTerms)
+      : recordId(_recordId),
+        wsid(_wsid),
+        score(_score),
+        advanced(false) {
+          advanced = false;
+          collected = false;
+          scoreTerms = _scoreTerms;
         }
       IndexData(RecordId _recordId,
                 WorkingSetID _wsid)
       : recordId(_recordId),
-        wsid(_wsid) {}
+        wsid(_wsid) {
+          collected = false;
+        }
       RecordId recordId;
       WorkingSetID wsid;
-      double score;
+      double score =0;
       double predictScore;
-      bool advanced;
+      bool advanced = false;
       ScoreStorage scoreTerms;
       ScoreStorage scorePredictTerms;
-      bool collected;
+      bool collected = false;
 
     };
     struct Records {};
@@ -162,7 +177,7 @@ public:
     };
 
     struct updateScore {
-      updateScore(size_t termID, double newScore, std::vector<double> scoreStatus):termID(termID), newScore(newScore){
+      updateScore(size_t termID, double newScore, std::vector<double> scoreStatus, bool isCollected):termID(termID), newScore(newScore), isCollected(isCollected){
         _scoreStatus = scoreStatus;
       }
 
@@ -185,6 +200,23 @@ public:
           }
           record.predictScore += record.scorePredictTerms[i];
         }
+        if(isCollected) {
+          double recordScore = 0;
+          bool isAllCollected = true;
+          for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
+            if(0 == record.scoreTerms[i]) {
+              isAllCollected = false;
+              break;
+            }
+            recordScore += record.scoreTerms[i];
+          }
+          if (isAllCollected) {
+            record.score = recordScore;
+            record.collected = true;
+          } else {
+            record.score = 0;
+          }
+        }
 
       }
 
@@ -192,6 +224,43 @@ public:
         size_t termID;
         double newScore;
         std::vector<double> _scoreStatus;
+        bool isCollected;
+    };
+
+    struct updateOrder {
+      updateOrder(size_t termID, double newScore, bool isCollected):termID(termID), newScore(newScore), isCollected(isCollected){}
+
+      void operator()(IndexData& record)
+      {
+        record.scoreTerms[termID] = newScore;
+        if(record.advanced) {
+          record.score = 0;
+          return;
+        }
+        record.score += newScore;
+        if(isCollected) {
+          bool isAllCollected = true;
+          double recordScore = 0;
+          for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
+            if(0 == record.scoreTerms[i]) {
+              isAllCollected = false;
+              break;
+            }
+            recordScore += record.scoreTerms[i];
+          }
+          if (isAllCollected) {
+            record.collected = true;
+            record.score = recordScore;
+          } else {
+            record.score = 0;
+          }
+        }
+      }
+
+      private:
+        size_t termID;
+        double newScore;
+        bool isCollected;
     };
 
     struct trueAdvance {
@@ -207,8 +276,23 @@ public:
         bool advanced;
     };
 
+    struct trueCollected {
+      trueCollected(bool collected):collected(collected){}
+
+      void operator()(IndexData& record)
+      {
+        record.collected = collected;
+      }
+      private:
+        bool collected;
+    };
+
     void update(RecordIndex::iterator it, size_t termID, double newScore, std::vector<double> scoreStatus) {
-      _container.modify(it, updateScore(termID, newScore, scoreStatus));
+      _container.modify(it, updateScore(termID, newScore, scoreStatus, isCollected));
+    };
+
+    void update(RecordIndex::iterator it, size_t termID, double newScore) {
+      _container.modify(it, updateOrder(termID, newScore, isCollected));
     };
 
     void refreshScore(const RecordId& recordId, std::vector<double> scoreStatus) {
@@ -220,6 +304,10 @@ public:
       RecordIndex::iterator it = findByID(recordId);
       //std::cout << "\n set advanced  recordId " << recordId;
       _container.modify(it, trueAdvance(true));
+    };
+
+    void setCollected(RecordIndex::iterator it, const RecordId& recordId) {
+      _container.modify(it, trueCollected(true));
     };
 
     void resetScopeIterator() {
@@ -272,9 +360,14 @@ public:
         return _container.size();
     }
 
+    void enableCollected(){
+      isCollected = true;
+    }
+
 
 private:
     IndexContainer _container;
     ScoreIndex::iterator _scoreIterator;
+    bool isCollected = false;
 };
 }
