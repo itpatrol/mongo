@@ -120,22 +120,45 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
     // First we need to retrive positive phrase indexes
     std::vector<std::set<std::string>> positivePhrasesBounds =
         _params.query.getTermsPhrasesForBounds();
-    auto textORSearcher = make_unique<TextOrStage>(opCtx, ws, _params.spec, wantTextScore);
     // auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
-    // auto textORSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, true);
+    auto textAndSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, true);
     std::vector<std::unique_ptr<PlanStage>> indexORScanList;
 
-    // We have positive phrases, retrive them separately
+    bool isAndSearch = false;
+    // We have positive phrases, retrive them all together.
+    // Separating by phrase is for future $search language changes.
     if (0 < positivePhrasesBounds.size()) {
-
-        // Create stage TextAnd for each phrase
+        isAndSearch = true;
+        std::set<std::string> andTerms;
         for (size_t i = 0; i < positivePhrasesBounds.size(); i++) {
-            std::set<std::string> andTerms = positivePhrasesBounds[i];
-            std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
-            // OPTIMIZATION: If phrase is single term, add it directly ot TEXT_OR
-            if (1 == andTerms.size()) {
-                std::set<std::string>::const_iterator setIterator = andTerms.begin();
-                const auto& term = *setIterator;
+          std::set<std::string> phraseTerms = positivePhrasesBounds[i];
+          for (const auto& term : phraseTerms) {
+            andTerms.insert(term);
+          }
+        }
+        // scan index for each term separately
+        std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
+        for (const auto& term : andTerms) {
+            IndexScanParams ixparams;
+
+            ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+            ixparams.bounds.isSimpleRange = true;
+            ixparams.descriptor = _params.index;
+            ixparams.direction = -1;
+            indexORScanList.push_back(
+                  stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+        }
+        // Create stage TextAnd for each phrase
+        
+        textAndSearcher->addChildren(std::move(indexORScanList));
+        std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
+        if (0 < negativeTerms.size()) {
+            std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
+            for (const auto& term : _params.query.getNegatedTerms()) {
                 IndexScanParams ixparams;
 
                 ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
@@ -147,65 +170,45 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 ixparams.descriptor = _params.index;
                 ixparams.direction = -1;
 
-                indexORScanList.push_back(
-                    stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-            } else {
-                // scan index for each term separately
-                for (const auto& term : andTerms) {
-                    IndexScanParams ixparams;
-
-                    ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                        MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                    ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                        0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                    ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-                    ixparams.bounds.isSimpleRange = true;
-                    ixparams.descriptor = _params.index;
-                    ixparams.direction = -1;
-
-                    indexAndScanList.push_back(
-                        stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-                }
-                // Add TextAndStage to OR childrenList
-
-                indexORScanList.push_back(stdx::make_unique<TextAndStage>(
-                    opCtx, ws, _params.spec, wantTextScore, std::move(indexAndScanList)));
+                indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
             }
+            auto textNINStage = make_unique<TextNINStage>(
+                opCtx, ws, textAndSearcher.release(), std::move(indexNINScanList));
+
+            const MatchExpression* emptyFilter = nullptr;
+            auto fetchStage = make_unique<FetchStage>(
+                opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
+
+            textMatchStage = make_unique<TextMatchStage>(
+                opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
+            return textMatchStage;
         }
-        // Add single terms that did not match into prases
-        for (const auto& term : _params.query.getTermsOutOfPhrasesForBounds()) {
-            IndexScanParams ixparams;
+        const MatchExpression* emptyFilter = nullptr;
+        auto fetchStage = make_unique<FetchStage>(
+            opCtx, ws, textAndSearcher.release(), emptyFilter, _params.index->getCollection());
+        textMatchStage = make_unique<TextMatchStage>(
+            opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
 
-            ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-            ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-            ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-            ixparams.bounds.isSimpleRange = true;
-            ixparams.descriptor = _params.index;
-            ixparams.direction = -1;
-
-            indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-        }
-        textORSearcher->addChildren(std::move(indexORScanList));
-    } else {
-        // Searching for all not phrase terms
-        for (const auto& term : _params.query.getTermsForBounds()) {
-            IndexScanParams ixparams;
-
-            ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-            ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-            ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-            ixparams.bounds.isSimpleRange = true;
-            ixparams.descriptor = _params.index;
-            ixparams.direction = -1;
-
-            indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-        }
-        textORSearcher->addChildren(std::move(indexORScanList));
+        return textMatchStage;
     }
+    // No Else. We get here if no positive phrases exists.
+    // Searching for all not phrase terms
+    auto textORSearcher = make_unique<TextOrStage>(opCtx, ws, _params.spec, wantTextScore);
+    for (const auto& term : _params.query.getTermsForBounds()) {
+        IndexScanParams ixparams;
+
+        ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+            MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+        ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+            0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+        ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+        ixparams.bounds.isSimpleRange = true;
+        ixparams.descriptor = _params.index;
+        ixparams.direction = -1;
+
+        indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+    }
+    textORSearcher->addChildren(std::move(indexORScanList));
 
     std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
     // OPTIMIZATION: If we have negative terms, lets get indexes and cut them out from all positive
