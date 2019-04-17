@@ -117,6 +117,7 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
 
     // Build fetching plan based on _params.query
 
+
     // First we need to retrive positive phrase indexes
     std::vector<std::set<std::string>> positivePhrasesBounds =
         _params.query.getTermsPhrasesForBounds();
