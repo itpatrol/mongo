@@ -69,17 +69,17 @@ bool FTSMatcher::matches(const BSONObj& obj) const {
 }
 
 bool FTSMatcher::matches(const BSONObj& obj, bool isNegativeExcluded) const {
-    if(isNegativeExcluded) {
-      if (!canSkipPositiveTermCheck()) { 
-        if (!hasPositiveTerm(obj)) {
+    if (isNegativeExcluded) {
+        if (!canSkipPositiveTermCheck()) {
+            if (!hasPositiveTerm(obj)) {
+                return false;
+            }
+        }
+        if (!positivePhrasesMatch(obj)) {
             return false;
-        } 
-      }
-      if (!positivePhrasesMatch(obj)) {
-        return false;
-      }
+        }
 
-      return negativePhrasesMatch(obj);
+        return negativePhrasesMatch(obj);
     }
     if (canSkipPositiveTermCheck()) {
         // We can assume that 'obj' has at least one positive term, and dassert as a sanity

@@ -38,10 +38,10 @@
 #include "mongo/db/exec/index_scan.h"
 #include "mongo/db/exec/or.h"
 #include "mongo/db/exec/scoped_timer.h"
-#include "mongo/db/exec/text_match.h"
-#include "mongo/db/exec/text_or.h"
 #include "mongo/db/exec/text_and.h"
+#include "mongo/db/exec/text_match.h"
 #include "mongo/db/exec/text_nin.h"
+#include "mongo/db/exec/text_or.h"
 #include "mongo/db/exec/working_set.h"
 #include "mongo/db/fts/fts_index_format.h"
 #include "mongo/db/jsobj.h"
@@ -108,107 +108,38 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
 
     // return EOF stage for when no positive terms provided.
     std::set<std::string> termsForBounds = _params.query.getTermsForBounds();
-    if(0 == termsForBounds.size()) {
-      auto eofStage = make_unique<EOFStage>(
-          opCtx);
-      return eofStage;
+    if (0 == termsForBounds.size()) {
+        auto eofStage = make_unique<EOFStage>(opCtx);
+        return eofStage;
     }
 
     std::unique_ptr<PlanStage> textMatchStage;
 
     // Build fetching plan based on _params.query
-    if (!wantTextScore) {
-        //First we need to retrive positive phrase indexes
-        std::vector<std::set<std::string>> positivePhrasesBounds = _params.query.getTermsPhrasesForBounds();
-        auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
-        std::vector<std::unique_ptr<PlanStage>> indexORScanList;
 
-        // We have positive phrases, retrive them separately 
-        if(0 < positivePhrasesBounds.size()) {
-          
-            // Create stage TextAnd for each phrase 
-            for (size_t i = 0; i < positivePhrasesBounds.size(); i++) {
-                std::set<std::string> andTerms = positivePhrasesBounds[i];
-                std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
 
-                // OPTIMIZATION: If phrase is single term, add it directly ot TEXT_OR
-                if (1 == andTerms.size()) {
-                    std::set<std::string>::const_iterator setIterator = andTerms.begin();
-                    const auto& term = *setIterator;
-                    IndexScanParams ixparams;
+    // First we need to retrive positive phrase indexes
+    std::vector<std::set<std::string>> positivePhrasesBounds =
+        _params.query.getTermsPhrasesForBounds();
+    // auto textORSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
+    auto textAndSearcher = make_unique<TextAndStage>(opCtx, ws, _params.spec, wantTextScore);
+    std::vector<std::unique_ptr<PlanStage>> indexORScanList;
 
-                    ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                        MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                    ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                        0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                    ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-                    ixparams.bounds.isSimpleRange = true;
-                    ixparams.descriptor = _params.index;
-                    ixparams.direction = -1;
-
-                    indexORScanList.push_back(
-                        stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-                } else {
-                    // scan index for each term separately
-                    for (const auto& term : andTerms) {
-                        IndexScanParams ixparams;
-
-                        ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                            MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                        ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                            0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                        ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-                        ixparams.bounds.isSimpleRange = true;
-                        ixparams.descriptor = _params.index;
-                        ixparams.direction = -1;
-
-                        indexAndScanList.push_back(
-                            stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-                    }
-                    // Add TextAndStage to OR childrenList
-
-                    indexORScanList.push_back(stdx::make_unique<TextAndStage>(
-                        opCtx, ws, _params.spec, wantTextScore, std::move(indexAndScanList)));
-                }
+    bool isAndSearch = false;
+    // We have positive phrases, retrive them all together.
+    // Separating by phrase is for future $search language changes.
+    if (0 < positivePhrasesBounds.size()) {
+        isAndSearch = true;
+        std::set<std::string> andTerms;
+        for (size_t i = 0; i < positivePhrasesBounds.size(); i++) {
+            std::set<std::string> phraseTerms = positivePhrasesBounds[i];
+            for (const auto& term : phraseTerms) {
+                andTerms.insert(term);
             }
-            // Add single terms that did not match into prases
-            for (const auto& term : _params.query.getTermsOutOfPhrasesForBounds()) {
-                IndexScanParams ixparams;
-
-                ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                    MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                    0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-                ixparams.bounds.isSimpleRange = true;
-                ixparams.descriptor = _params.index;
-                ixparams.direction = -1;
-
-                indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-            }
-            textORSearcher->addChildren(std::move(indexORScanList));
-        } else {
-            for (const auto& term : _params.query.getTermsForBounds()) {
-                IndexScanParams ixparams;
-
-                ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
-                    MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
-                    0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
-                ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
-                ixparams.bounds.isSimpleRange = true;
-                ixparams.descriptor = _params.index;
-                ixparams.direction = -1;
-
-                indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-            }
-            textORSearcher->addChildren(std::move(indexORScanList));
         }
-
-        std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
-        if(0 < negativeTerms.size()) {
-          std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
-          for (const auto& term : _params.query.getNegatedTerms()) {
+        // scan index for each term separately
+        std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
+        for (const auto& term : andTerms) {
             IndexScanParams ixparams;
 
             ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
@@ -219,29 +150,51 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
             ixparams.bounds.isSimpleRange = true;
             ixparams.descriptor = _params.index;
             ixparams.direction = -1;
+            indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+        }
+        // Create stage TextAnd for each phrase
 
-            indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
-          }
-          auto textNINStage = make_unique<TextNINStage>(
-            opCtx, ws, textORSearcher.release(), std::move(indexNINScanList));
+        textAndSearcher->addChildren(std::move(indexORScanList));
+        std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
+        if (0 < negativeTerms.size()) {
+            std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
+            for (const auto& term : _params.query.getNegatedTerms()) {
+                IndexScanParams ixparams;
 
-          const MatchExpression* emptyFilter = nullptr;
-          auto fetchStage = make_unique<FetchStage>(
-              opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
+                ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                    MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                    0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+                ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+                ixparams.bounds.isSimpleRange = true;
+                ixparams.descriptor = _params.index;
+                ixparams.direction = -1;
 
-          textMatchStage = make_unique<TextMatchStage>(
-              opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
-          return textMatchStage;
+                indexNINScanList.push_back(
+                    stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+            }
+            auto textNINStage = make_unique<TextNINStage>(
+                opCtx, ws, textAndSearcher.release(), std::move(indexNINScanList));
+
+            const MatchExpression* emptyFilter = nullptr;
+            auto fetchStage = make_unique<FetchStage>(
+                opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
+
+            textMatchStage = make_unique<TextMatchStage>(
+                opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
+            return textMatchStage;
         }
         const MatchExpression* emptyFilter = nullptr;
         auto fetchStage = make_unique<FetchStage>(
-            opCtx, ws, textORSearcher.release(), emptyFilter, _params.index->getCollection());
-
+            opCtx, ws, textAndSearcher.release(), emptyFilter, _params.index->getCollection());
         textMatchStage = make_unique<TextMatchStage>(
             opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
+
         return textMatchStage;
     }
-
+    // No Else. We get here if no positive phrases exists.
+    // Searching for all not phrase terms
+    auto textORSearcher = make_unique<TextOrStage>(opCtx, ws, _params.spec, wantTextScore);
     for (const auto& term : _params.query.getTermsForBounds()) {
         IndexScanParams ixparams;
 
@@ -254,38 +207,46 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
         ixparams.descriptor = _params.index;
         ixparams.direction = -1;
 
-        indexScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+        indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
     }
+    textORSearcher->addChildren(std::move(indexORScanList));
 
-    // Build the union of the index scans as a TEXT_OR or an OR stage, depending on whether the
-    // projection requires the "textScore" $meta field.
-    
-    if (wantTextScore) {
-        // We use a TEXT_OR stage to get the union of the results from the index scans and then
-        // compute their text scores. This is a blocking operation.
-        auto textScorer = make_unique<TextOrStage>(opCtx, _params.spec, ws, filter, _params.index);
+    std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
+    // OPTIMIZATION: If we have negative terms, lets get indexes and cut them out from all positive
+    // terms.
+    if (0 < negativeTerms.size()) {
+        std::vector<std::unique_ptr<PlanStage>> indexNINScanList;
+        for (const auto& term : _params.query.getNegatedTerms()) {
+            IndexScanParams ixparams;
 
-        textScorer->addChildren(std::move(indexScanList));
+            ixparams.bounds.startKey = FTSIndexFormat::getIndexKey(
+                MAX_WEIGHT, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.endKey = FTSIndexFormat::getIndexKey(
+                0, term, _params.indexPrefix, _params.spec.getTextIndexVersion());
+            ixparams.bounds.boundInclusion = BoundInclusion::kIncludeBothStartAndEndKeys;
+            ixparams.bounds.isSimpleRange = true;
+            ixparams.descriptor = _params.index;
+            ixparams.direction = -1;
 
-        textMatchStage = make_unique<TextMatchStage>(
-            opCtx, std::move(textScorer), _params.query, _params.spec, ws);
-    } else {
-        // Because we don't need the text score, we can use a non-blocking OR stage to get the union
-        // of the index scans.
-        auto textSearcher = make_unique<OrStage>(opCtx, ws, true, filter);
+            indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+        }
+        auto textNINStage = make_unique<TextNINStage>(
+            opCtx, ws, textORSearcher.release(), std::move(indexNINScanList));
 
-        textSearcher->addChildren(std::move(indexScanList));
-
-        // Unlike the TEXT_OR stage, the OR stage does not fetch the documents that it outputs. We
-        // add our own FETCH stage to satisfy the requirement of the TEXT_MATCH stage that its
-        // WorkingSetMember inputs have fetched data.
         const MatchExpression* emptyFilter = nullptr;
         auto fetchStage = make_unique<FetchStage>(
-            opCtx, ws, textSearcher.release(), emptyFilter, _params.index->getCollection());
+            opCtx, ws, textNINStage.release(), emptyFilter, _params.index->getCollection());
 
         textMatchStage = make_unique<TextMatchStage>(
-            opCtx, std::move(fetchStage), _params.query, _params.spec, ws);
+            opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
+        return textMatchStage;
     }
+
+    const MatchExpression* emptyFilter = nullptr;
+    auto fetchStage = make_unique<FetchStage>(
+        opCtx, ws, textORSearcher.release(), emptyFilter, _params.index->getCollection());
+    textMatchStage = make_unique<TextMatchStage>(
+        opCtx, std::move(fetchStage), _params.query, _params.spec, ws, true);
 
     return textMatchStage;
 }

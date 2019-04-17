@@ -95,7 +95,7 @@ private:
     // Not owned by us.
     WorkingSet* _ws;
 
-    //Do we want text score?
+    // Do we want text score?
     bool _isNegativeExcluded;
 
     TextMatchStats _specificStats;
