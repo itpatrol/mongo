@@ -26,34 +26,38 @@
  *    delete this exception statement from your version. If you delete this
  *    exception statement from all source files in the program, then also delete
  *    it in the license file.
+ *    TODO: see if we can update it
  */
 
 #pragma once
 
-#include <memory>
+#include "mongo/platform/basic.h"
+
 #include <vector>
 
-#include "mongo/db/catalog/collection.h"
+
 #include "mongo/db/exec/plan_stage.h"
+#include "mongo/db/exec/text_map_index.h"
+#include "mongo/db/fts/fts_query_impl.h"
 #include "mongo/db/fts/fts_spec.h"
-#include "mongo/db/index/index_descriptor.h"
-#include "mongo/db/matcher/expression.h"
+#include "mongo/db/jsobj.h"
 #include "mongo/db/record_id.h"
+#include "mongo/platform/unordered_map.h"
+#include "mongo/platform/unordered_set.h"
+#include "mongo/stdx/functional.h"
+
 
 namespace mongo {
 
-using std::unique_ptr;
-using std::vector;
-
 using fts::FTSSpec;
-
-class OperationContext;
+using fts::FTSQueryImpl;
 
 /**
- * A blocking stage that returns the set of WSMs with RecordIDs of all of the documents that contain
- * the positive terms in the search query, as well as their scores.
+ * This stage outputs the union of its children.  It optionally deduplicates on RecordId.
  *
- * The WorkingSetMembers returned are fetched and in the LOC_AND_OBJ state.
+ * Preconditions: Valid RecordId.
+ *
+ * If we're deduping, we may fail to dedup any invalidated RecordId properly.
  */
 class TextOrStage final : public PlanStage {
 public:
@@ -61,27 +65,21 @@ public:
      * Internal states.
      */
     enum class State {
-        // 1. Initialize the _recordCursor.
-        kInit,
-
-        // 2. Read the terms/scores from the text index.
+        // 1. Read from previos stages
         kReadingTerms,
 
-        // 3. Return results to our parent.
+        // 2. Return results to our parent.
         kReturningResults,
 
-        // 4. Finished.
+        // 3. Finished.
         kDone,
     };
-
     TextOrStage(OperationContext* opCtx,
-                const FTSSpec& ftsSpec,
                 WorkingSet* ws,
-                const MatchExpression* filter,
-                IndexDescriptor* index);
-    ~TextOrStage();
+                const FTSSpec& ftsSpec,
+                bool wantTextScore);
 
-    void addChild(unique_ptr<PlanStage> child);
+    void addChild(PlanStage* child);
 
     void addChildren(Children childrenToAdd);
 
@@ -89,10 +87,6 @@ public:
 
     StageState doWork(WorkingSetID* out) final;
 
-    void doSaveState() final;
-    void doRestoreState() final;
-    void doDetachFromOperationContext() final;
-    void doReattachToOperationContext() final;
     void doInvalidate(OperationContext* opCtx, const RecordId& dl, InvalidationType type) final;
 
     StageType stageType() const final {
@@ -104,14 +98,30 @@ public:
     const SpecificStats* getSpecificStats() const final;
 
     static const char* kStageType;
+    static const size_t kChildIsEOF;
+    static const size_t kMinReserve;
 
 private:
+    // Private State function for doing cyrcle rotate reading on each index.
+    struct currentWorkState {
+        currentWorkState() : wsid(WorkingSet::INVALID_ID), childStatus(StageState::IS_EOF) {}
+        WorkingSetID wsid;
+        StageState childStatus;
+    };
+    currentWorkState _currentWorkState;
     /**
-     * Worker for kInit. Initializes the _recordCursor member and handles the potential for
-     * getCursor() to throw WriteConflictException.
+     * get data from next child
      */
-    StageState initStage(WorkingSetID* out);
-
+    bool processNextDoWork();
+    /**
+     * Is all children get to EOF?
+     */
+    bool isChildrenEOF();
+    /**
+    * Worker for Single CHild. Reads from the children, searching for the terms in the query and
+    * populates the score map.
+    */
+    StageState readFromChild(WorkingSetID* out);
     /**
      * Worker for kReadingTerms. Reads from the children, searching for the terms in the query and
      * populates the score map.
@@ -119,49 +129,60 @@ private:
     StageState readFromChildren(WorkingSetID* out);
 
     /**
-     * Helper called from readFromChildren to update aggregate score with a newfound (term, score)
-     * pair for this document.
+     * Worker to send back result that is ready by score race.
      */
-    StageState addTerm(WorkingSetID wsid, WorkingSetID* out);
+    StageState returnReadyResults(WorkingSetID* out);
 
     /**
      * Worker for kReturningResults. Returns a wsm with RecordID and Score.
      */
     StageState returnResults(WorkingSetID* out);
 
-    // The index spec used to determine where to find the score.
-    FTSSpec _ftsSpec;
+    /**
+     * Retrive score from previos stage.
+     */
+    double getIndexScore(WorkingSetMember* member);
 
     // Not owned by us.
     WorkingSet* _ws;
 
+    // The index spec used to determine where to find the score.
+    FTSSpec _ftsSpec;
+
+    // Store Index data in boost multi index container.
+    TextMapIndex _dataIndexMap;
+
     // What state are we in?  See the State enum above.
-    State _internalState = State::kInit;
+    State _internalState = State::kReadingTerms;
 
     // Which of _children are we calling work(...) on now?
     size_t _currentChild = 0;
 
-    /**
-     *  Temporary score data filled out by children.
-     *  Maps from RecordID -> (aggregate score for doc, wsid).
-     *  Map each buffered record id to this data.
-     */
-    struct TextRecordData {
-        TextRecordData() : wsid(WorkingSet::INVALID_ID), score(0.0) {}
-        WorkingSetID wsid;
-        double score;
-    };
+    // Track the status of the child work progress
+    // 0-N - number of processed items
+    // -1 - mean EOF from the child
+    std::vector<size_t> _indexerStatus;
 
-    typedef unordered_map<RecordId, TextRecordData, RecordId::Hasher> ScoreMap;
-    ScoreMap _scores;
-    ScoreMap::const_iterator _scoreIterator;
+    // Collect latest document score per child
+    std::vector<double> _scoreStatus;
 
+    // Collect all terms current score
+    double currentAllTermsScore = 0;
+
+    // True if query expects scores on RecordId, false otherwise.
+    bool _wantTextScore;
+
+
+    // Traking latest missing diff from PredictScore
+    double _predictScoreDiff = 0;
+    double _predictScoreStatBase = 0;
+
+    // Stats
     TextOrStats _specificStats;
 
-    // Members needed only for using the TextMatchableDocument.
-    const MatchExpression* _filter;
-    WorkingSetID _idRetrying;
-    std::unique_ptr<SeekableRecordCursor> _recordCursor;
-    IndexDescriptor* _index;
+    // Current reserved amount of container records.
+    // Reserving memory upfront speedup data manipulation and insert time into container.
+    size_t _reserved = 0;
 };
-}
+
+}  // namespace mongo

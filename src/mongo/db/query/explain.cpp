@@ -162,9 +162,6 @@ size_t getDocsExamined(StageType type, const SpecificStats* specific) {
     } else if (STAGE_IDHACK == type) {
         const IDHackStats* spec = static_cast<const IDHackStats*>(specific);
         return spec->docsExamined;
-    } else if (STAGE_TEXT_OR == type) {
-        const TextOrStats* spec = static_cast<const TextOrStats*>(specific);
-        return spec->fetches;
     }
 
     return 0;
@@ -521,7 +518,14 @@ void Explain::statsToBSON(const PlanStageStats& stats,
         TextOrStats* spec = static_cast<TextOrStats*>(stats.specific.get());
 
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
-            bob->appendNumber("docsExamined", spec->fetches);
+            bob->appendNumber("wantTextScore", spec->wantTextScore);
+            bob->appendNumber("dupsTested", spec->dupsTested);
+            bob->appendNumber("dupsDropped", spec->dupsDropped);
+            bob->appendNumber("singleChildOptimization", spec->singleChild);
+            bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
+            for (size_t i = 0; i < spec->indexerCouter.size(); ++i) {
+                bob->appendNumber(string(stream() << "indexCounter_" << i), spec->indexerCouter[i]);
+            }
         }
     } else if (STAGE_UPDATE == stats.stageType) {
         UpdateStats* spec = static_cast<UpdateStats*>(stats.specific.get());
@@ -537,12 +541,12 @@ void Explain::statsToBSON(const PlanStageStats& stats,
         TextAndStats* spec = static_cast<TextAndStats*>(stats.specific.get());
 
         if (verbosity >= ExplainOptions::Verbosity::kExecStats) {
+            bob->appendNumber("wantTextScore", spec->wantTextScore);
             bob->appendNumber("dupsTested", spec->dupsTested);
             bob->appendNumber("dupsDropped", spec->dupsDropped);
             bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
             for (size_t i = 0; i < spec->_counter.size(); ++i) {
-                bob->appendNumber(string(stream() << "childCounter_" << i),
-                                  spec->_counter[i]);
+                bob->appendNumber(string(stream() << "childCounter_" << i), spec->_counter[i]);
             }
         }
     } else if (STAGE_TEXT_NIN == stats.stageType) {
@@ -555,8 +559,7 @@ void Explain::statsToBSON(const PlanStageStats& stats,
             bob->appendNumber("recordIdsForgotten", spec->recordIdsForgotten);
 
             for (size_t i = 0; i < spec->_counter.size(); ++i) {
-                bob->appendNumber(string(stream() << "childCounter_" << i),
-                                  spec->_counter[i]);
+                bob->appendNumber(string(stream() << "childCounter_" << i), spec->_counter[i]);
             }
         }
     }

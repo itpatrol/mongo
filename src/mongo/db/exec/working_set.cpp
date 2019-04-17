@@ -194,6 +194,10 @@ void WorkingSetMember::addComputed(WorkingSetComputedData* data) {
     verify(!hasComputed(data->type()));
     _computed[data->type()].reset(data);
 }
+void WorkingSetMember::updateComputed(WorkingSetComputedData* data) {
+    verify(hasComputed(data->type()));
+    _computed[data->type()].reset(data);
+}
 
 void WorkingSetMember::setFetcher(RecordFetcher* fetcher) {
     _fetcher.reset(fetcher);

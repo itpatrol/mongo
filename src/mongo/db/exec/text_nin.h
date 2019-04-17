@@ -50,10 +50,7 @@ namespace mongo {
  */
 class TextNINStage final : public PlanStage {
 public:
-    TextNINStage(OperationContext* opCtx,
-      WorkingSet* ws,
-      PlanStage* child,
-      Children childrenToAdd);
+    TextNINStage(OperationContext* opCtx, WorkingSet* ws, PlanStage* child, Children childrenToAdd);
 
     void addChild(PlanStage* child);
 
