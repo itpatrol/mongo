@@ -131,10 +131,10 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
         isAndSearch = true;
         std::set<std::string> andTerms;
         for (size_t i = 0; i < positivePhrasesBounds.size(); i++) {
-          std::set<std::string> phraseTerms = positivePhrasesBounds[i];
-          for (const auto& term : phraseTerms) {
-            andTerms.insert(term);
-          }
+            std::set<std::string> phraseTerms = positivePhrasesBounds[i];
+            for (const auto& term : phraseTerms) {
+                andTerms.insert(term);
+            }
         }
         // scan index for each term separately
         std::vector<std::unique_ptr<PlanStage>> indexAndScanList;
@@ -149,11 +149,10 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
             ixparams.bounds.isSimpleRange = true;
             ixparams.descriptor = _params.index;
             ixparams.direction = -1;
-            indexORScanList.push_back(
-                  stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+            indexORScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
         }
         // Create stage TextAnd for each phrase
-        
+
         textAndSearcher->addChildren(std::move(indexORScanList));
         std::set<std::string> negativeTerms = _params.query.getNegatedTerms();
         if (0 < negativeTerms.size()) {
@@ -170,7 +169,8 @@ unique_ptr<PlanStage> TextStage::buildTextTree(OperationContext* opCtx,
                 ixparams.descriptor = _params.index;
                 ixparams.direction = -1;
 
-                indexNINScanList.push_back(stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
+                indexNINScanList.push_back(
+                    stdx::make_unique<IndexScan>(opCtx, ixparams, ws, nullptr));
             }
             auto textNINStage = make_unique<TextNINStage>(
                 opCtx, ws, textAndSearcher.release(), std::move(indexNINScanList));

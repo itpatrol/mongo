@@ -147,7 +147,7 @@ private:
     // Not owned by us.
     WorkingSet* _ws;
 
-    //Store Index data in boost multi index container.
+    // Store Index data in boost multi index container.
     TextMapIndex _dataIndexMap;
 
     // What state are we in?  See the State enum above.
@@ -165,7 +165,7 @@ private:
     std::vector<double> _scoreStatus;
 
     // Collect all terms current score
-    double currentAllTermsScore =0;
+    double currentAllTermsScore = 0;
 
     // True if query expects scores on RecordId, false otherwise.
     bool _wantTextScore;
@@ -173,13 +173,13 @@ private:
     bool _isNoMoreInserts = false;
 
     // Traking latest missing diff from PredictScore
-    double _predictScoreDiff = 0 ;
-    double _predictScoreStatBase = 0 ;
+    double _predictScoreDiff = 0;
+    double _predictScoreStatBase = 0;
 
     // Stats
     TextAndStats _specificStats;
 
-    // Current reserved amount of container records. 
+    // Current reserved amount of container records.
     // Reserving memory upfront speedup data manipulation and insert time into container.
     size_t _reserved = 0;
 };

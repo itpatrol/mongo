@@ -102,7 +102,6 @@ public:
     static const size_t kMinReserve;
 
 private:
-
     // Private State function for doing cyrcle rotate reading on each index.
     struct currentWorkState {
         currentWorkState() : wsid(WorkingSet::INVALID_ID), childStatus(StageState::IS_EOF) {}
@@ -150,7 +149,7 @@ private:
     // The index spec used to determine where to find the score.
     FTSSpec _ftsSpec;
 
-    //Store Index data in boost multi index container.
+    // Store Index data in boost multi index container.
     TextMapIndex _dataIndexMap;
 
     // What state are we in?  See the State enum above.
@@ -168,24 +167,22 @@ private:
     std::vector<double> _scoreStatus;
 
     // Collect all terms current score
-    double currentAllTermsScore =0;
+    double currentAllTermsScore = 0;
 
     // True if query expects scores on RecordId, false otherwise.
     bool _wantTextScore;
 
 
     // Traking latest missing diff from PredictScore
-    double _predictScoreDiff = 0 ;
-    double _predictScoreStatBase = 0 ;
+    double _predictScoreDiff = 0;
+    double _predictScoreStatBase = 0;
 
     // Stats
     TextOrStats _specificStats;
 
-    // Current reserved amount of container records. 
+    // Current reserved amount of container records.
     // Reserving memory upfront speedup data manipulation and insert time into container.
     size_t _reserved = 0;
-
-    
 };
 
 }  // namespace mongo
