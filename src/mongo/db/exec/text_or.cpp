@@ -28,7 +28,6 @@
  *    it in the license file.
  */
 
-#define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kStorage
 
 #include "mongo/db/exec/text_or.h"
 
@@ -37,7 +36,6 @@
 #include "mongo/db/exec/working_set_computed_data.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/mongoutils/str.h"
-#include "mongo/util/log.h"
 
 namespace mongo {
 
@@ -219,7 +217,6 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
           _dataIndexMap.reserve(_reserved);
         }
 
-        auto startReadFrom = std::chrono::high_resolution_clock::now();
         if (!_wantTextScore) {
             TextMapIndex::RecordIndex::iterator itC = _dataIndexMap.findByID(member->recordId);
             if(itC != _dataIndexMap.endRecords()) {
@@ -231,8 +228,6 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
             _dataIndexMap.emplace(member->recordId,
                                 _currentWorkState.wsid);
 
-
-            _debugCounterInsert += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
             // Update stats counters.
             ++_specificStats.indexerCouter[_currentChild];
             *out = _currentWorkState.wsid;
@@ -245,7 +240,6 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
         if(itC == _dataIndexMap.endRecords()) {
 
           TextMapIndex::ScoreStorage scoreTerms = TextMapIndex::ScoreStorage();
-          //auto scoreTerms = std::vector<double>(_indexerStatus.size(), 0);
           TextMapIndex::ScoreStorage scorePredictTerms = TextMapIndex::ScoreStorage();
           double PredictScore = 0;
           for (size_t i = 0; i < _scoreStatus.size(); ++i) {
@@ -267,11 +261,10 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
                                 scoreTerms,
                                 scorePredictTerms);
 
-          _debugCounterInsert += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
+
         } else {
           ++_specificStats.dupsDropped;
           _dataIndexMap.update(itC, _currentChild, documentTermScore, _scoreStatus);
-          _debugCounterUpdate += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - startReadFrom).count();
         }
         *out = _currentWorkState.wsid;
         return PlanStage::NEED_TIME;
@@ -286,8 +279,6 @@ PlanStage::StageState TextOrStage::readFromChildren(WorkingSetID* out) {
           return PlanStage::NEED_TIME;
         }
 
-        LOG(1) << "_debugCounterInsert " << _debugCounterInsert ;
-        LOG(1) << "_debugCounterUpdate " << _debugCounterUpdate ;
         _dataIndexMap.resetScopeIterator();
             
         if (!_wantTextScore) {

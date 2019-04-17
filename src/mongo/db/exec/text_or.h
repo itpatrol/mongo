@@ -181,9 +181,6 @@ private:
     // Stats
     TextOrStats _specificStats;
 
-    long long _debugCounterInsert = 0;
-    long long _debugCounterUpdate = 0;
-
     // Current reserved amount of container records. 
     // Reserving memory upfront speedup data manipulation and insert time into container.
     size_t _reserved = 0;
