@@ -127,32 +127,37 @@ public:
         return boost::multi_index::get<Records>(_container).end();
     };
 
-    struct refreshScoreAction {
-        refreshScoreAction(std::vector<double> scoreStatus) {
-            _scoreStatus = scoreStatus;
+    struct refreshScoreAction{
+      refreshScoreAction(std::vector<double> scoreStatus, bool isCollected):isCollected(isCollected) {
+        _scoreStatus = scoreStatus;
+      }
+
+      void operator()(IndexData& record)
+      {
+
+        record.score = 0;
+        record.predictScore = 0;
+        if(record.advanced) {
+          return;
         }
-
-        void operator()(IndexData& record) {
-
-            record.score = 0;
-            record.predictScore = 0;
-            if (record.advanced) {
-                return;
-            }
-
-            for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
-                record.score += record.scoreTerms[i];
-                if (0 == record.scoreTerms[i]) {
-                    record.scorePredictTerms[i] = _scoreStatus[i];
-                } else {
-                    record.scorePredictTerms[i] = record.scoreTerms[i];
-                }
-                record.predictScore += record.scorePredictTerms[i];
-            }
+        double recordScore = 0;
+        for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
+          recordScore += record.scoreTerms[i];
+          if(0 == record.scoreTerms[i]) {
+            record.scorePredictTerms[i] = _scoreStatus[i];
+          } else {
+            record.scorePredictTerms[i] = record.scoreTerms[i];
+          }
+          record.predictScore += record.scorePredictTerms[i];
         }
+        if(!isCollected) {
+          record.score = recordScore;
+        }
+      }
 
-    private:
+      private:
         std::vector<double> _scoreStatus;
+        bool isCollected;
     };
 
     struct updateScore {
@@ -281,7 +286,7 @@ public:
 
     void refreshScore(const RecordId& recordId, std::vector<double> scoreStatus) {
         RecordIndex::iterator it = findByID(recordId);
-        _container.modify(it, refreshScoreAction(scoreStatus));
+        _container.modify(it, refreshScoreAction(scoreStatus, isCollected));
     };
 
     void setAdvanced(const RecordId& recordId) {
