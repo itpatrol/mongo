@@ -382,7 +382,6 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
         }
     }
 
-
     _dataIndexMap.resetScopeIterator();
 
     if (_dataIndexMap.size() < 2) {
@@ -429,18 +428,23 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
         TextMapIndex::IndexData predictRecordData = *itScorePredict;
         ++itScorePredict;
         ++predictCount;
+
         if (predictRecordData.predictScore <= recordData.score) {
             break;
         }
 
         // Check if breaking
-        double totalScoreDiff = recordData.score - predictRecordData.score;
         double expectedMaxScoreForSecond = 0;
+        // Score is 0 until record is fully collected.
+        double predictRecordDataScore = 0;
         for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
+            predictRecordDataScore += predictRecordData.scoreTerms[i];
             if (0 == predictRecordData.scoreTerms[i]) {
                 expectedMaxScoreForSecond += _scoreStatus[i];
             }
         }
+        double totalScoreDiff = recordData.score - predictRecordDataScore;
+        
         if (totalScoreDiff < expectedMaxScoreForSecond) {
             _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff;
             _predictScoreStatBase = currentAllTermsScore;
@@ -456,6 +460,7 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
             break;
         }
     }
+
 
     // If we are here - we good to advance this record.
 
