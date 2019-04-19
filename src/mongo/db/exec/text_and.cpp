@@ -440,20 +440,31 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
         for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
             predictRecordDataScore += predictRecordData.scoreTerms[i];
             if (0 == predictRecordData.scoreTerms[i]) {
+                if (0 == _scoreStatus[i]) {
+                    _dataIndexMap.setZeroScore(predictRecordData.recordId);
+                    continue;
+                }
                 expectedMaxScoreForSecond += _scoreStatus[i];
             }
         }
         double totalScoreDiff = recordData.score - predictRecordDataScore;
-        
-        if (totalScoreDiff < expectedMaxScoreForSecond) {
-            _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff;
-            _predictScoreStatBase = currentAllTermsScore;
-            return PlanStage::IS_EOF;
-        } else {
-            // Recalculate predict score for this record.
+
+        // Predicted score is full collected.
+        if (expectedMaxScoreForSecond == 0) {
             ++itScorePredict;
             _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
             --itScorePredict;
+        } else {
+            if (totalScoreDiff < expectedMaxScoreForSecond) {
+                _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff;
+                _predictScoreStatBase = currentAllTermsScore;
+                return PlanStage::IS_EOF;
+            } else {
+                // Recalculate predict score for this record.
+                ++itScorePredict;
+                _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
+                --itScorePredict;
+            }
         }
 
         if (itScorePredict == _dataIndexMap.endScorePredict()) {
@@ -463,7 +474,6 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
 
 
     // If we are here - we good to advance this record.
-
     _dataIndexMap.setAdvanced(recordData.recordId);
     WorkingSetMember* wsm = _ws->get(recordData.wsid);
     // Populate the working set member with the text score and return it.

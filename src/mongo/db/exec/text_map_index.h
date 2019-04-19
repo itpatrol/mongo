@@ -127,35 +127,41 @@ public:
         return boost::multi_index::get<Records>(_container).end();
     };
 
-    struct refreshScoreAction{
-      refreshScoreAction(std::vector<double> scoreStatus, bool isCollected):isCollected(isCollected) {
-        _scoreStatus = scoreStatus;
-      }
-
-      void operator()(IndexData& record)
-      {
-
-        record.score = 0;
-        record.predictScore = 0;
-        if(record.advanced) {
-          return;
+    struct refreshScoreAction {
+        refreshScoreAction(std::vector<double> scoreStatus, bool isCollected)
+            : isCollected(isCollected) {
+            _scoreStatus = scoreStatus;
         }
-        double recordScore = 0;
-        for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
-          recordScore += record.scoreTerms[i];
-          if(0 == record.scoreTerms[i]) {
-            record.scorePredictTerms[i] = _scoreStatus[i];
-          } else {
-            record.scorePredictTerms[i] = record.scoreTerms[i];
-          }
-          record.predictScore += record.scorePredictTerms[i];
-        }
-        if(!isCollected) {
-          record.score = recordScore;
-        }
-      }
 
-      private:
+        void operator()(IndexData& record) {
+
+            record.score = 0;
+            record.predictScore = 0;
+            if (record.advanced) {
+                return;
+            }
+            double recordScore = 0;
+
+            for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
+                recordScore += record.scoreTerms[i];
+                // if _scoreStatus[i] == 0 and collected true, predictScore 0;
+                if (0 == record.scoreTerms[i]) {
+                    // Downscore prediction if collected required and we already reach end of child
+                    if (0 == _scoreStatus[i] && isCollected) {
+                        return;
+                    }
+                    record.scorePredictTerms[i] = _scoreStatus[i];
+                } else {
+                    record.scorePredictTerms[i] = record.scoreTerms[i];
+                }
+                record.predictScore += record.scorePredictTerms[i];
+            }
+            if (!isCollected) {
+                record.score = recordScore;
+            }
+        }
+
+    private:
         std::vector<double> _scoreStatus;
         bool isCollected;
     };
@@ -262,6 +268,15 @@ public:
         bool advanced;
     };
 
+    struct zeroScore {
+        zeroScore() {}
+
+        void operator()(IndexData& record) {
+            record.predictScore = 0;
+            record.score = 0;
+        }
+    };
+
     struct trueCollected {
         trueCollected(bool collected) : collected(collected) {}
 
@@ -293,6 +308,11 @@ public:
         RecordIndex::iterator it = findByID(recordId);
         // std::cout << "\n set advanced  recordId " << recordId;
         _container.modify(it, trueAdvance(true));
+    };
+
+    void setZeroScore(const RecordId& recordId) {
+        RecordIndex::iterator it = findByID(recordId);
+        _container.modify(it, zeroScore());
     };
 
     void setCollected(RecordIndex::iterator it, const RecordId& recordId) {
