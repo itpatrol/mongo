@@ -382,7 +382,6 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
         }
     }
 
-
     _dataIndexMap.resetScopeIterator();
 
     if (_dataIndexMap.size() < 2) {
@@ -425,31 +424,47 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
     // Count how many records with predict score > that currentAllTermsScore;
     TextMapIndex::ScorePredictIndex::iterator itScorePredict = _dataIndexMap.beginScorePredict();
     size_t predictCount = 0;
+    if (itScorePredict == _dataIndexMap.endScorePredict()) {
+        return PlanStage::IS_EOF;
+    }
     while (true) {
         TextMapIndex::IndexData predictRecordData = *itScorePredict;
         ++itScorePredict;
         ++predictCount;
+
         if (predictRecordData.predictScore <= recordData.score) {
             break;
         }
 
         // Check if breaking
-        double totalScoreDiff = recordData.score - predictRecordData.score;
         double expectedMaxScoreForSecond = 0;
+        // Score is 0 until record is fully collected.
+        double predictRecordDataScore = 0;
         for (size_t i = 0; i < predictRecordData.scoreTerms.size(); ++i) {
+            predictRecordDataScore += predictRecordData.scoreTerms[i];
             if (0 == predictRecordData.scoreTerms[i]) {
+                if (0 == _scoreStatus[i]) {
+                    _dataIndexMap.setZeroScore(predictRecordData.recordId);
+                    continue;
+                }
                 expectedMaxScoreForSecond += _scoreStatus[i];
             }
         }
-        if (totalScoreDiff < expectedMaxScoreForSecond) {
-            _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff;
-            _predictScoreStatBase = currentAllTermsScore;
-            return PlanStage::IS_EOF;
-        } else {
+        double totalScoreDiff = recordData.score - predictRecordDataScore;
+
+        // Predicted score is full collected.
+        if (expectedMaxScoreForSecond == 0) {
             // Recalculate predict score for this record.
-            ++itScorePredict;
             _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
-            --itScorePredict;
+        } else {
+            if (totalScoreDiff < expectedMaxScoreForSecond) {
+                _predictScoreDiff = expectedMaxScoreForSecond - totalScoreDiff;
+                _predictScoreStatBase = currentAllTermsScore;
+                return PlanStage::IS_EOF;
+            } else {
+                // Recalculate predict score for this record.
+                _dataIndexMap.refreshScore(predictRecordData.recordId, _scoreStatus);
+            }
         }
 
         if (itScorePredict == _dataIndexMap.endScorePredict()) {
@@ -457,8 +472,8 @@ PlanStage::StageState TextAndStage::returnReadyResults(WorkingSetID* out) {
         }
     }
 
-    // If we are here - we good to advance this record.
 
+    // If we are here - we good to advance this record.
     _dataIndexMap.setAdvanced(recordData.recordId);
     WorkingSetMember* wsm = _ws->get(recordData.wsid);
     // Populate the working set member with the text score and return it.
