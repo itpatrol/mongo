@@ -141,6 +141,7 @@ public:
                 return;
             }
             double recordScore = 0;
+            double predictRecordScore = 0;
 
             for (size_t i = 0; i < record.scoreTerms.size(); ++i) {
                 recordScore += record.scoreTerms[i];
@@ -154,8 +155,12 @@ public:
                 } else {
                     record.scorePredictTerms[i] = record.scoreTerms[i];
                 }
-                record.predictScore += record.scorePredictTerms[i];
+                predictRecordScore += record.scorePredictTerms[i];
             }
+            // Apply predictRecordScore after for cycle is end.
+            // If _scoreStatus is run out of score, we imideatly get out inside for
+            // So we need to apply predict only if we are still here.
+            record.predictScore = predictRecordScore;
             if (!isCollected) {
                 record.score = recordScore;
             }
